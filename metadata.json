@@ -1,0 +1,6 @@
+{
+  "name": "OPERATION: SHADOW STRIKE",
+  "description": "Cinematic 3D auto-run combat action game featuring Agent Kai Mercer with procedural infinite missions, aircraft dogfights, dynamic radio intel, epic boss encounters, tactical upgrades, and mobile controls.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
