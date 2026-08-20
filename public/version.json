@@ -1,0 +1,8 @@
+{
+  "version": "2.1.0",
+  "buildTime": 1771569400000,
+  "buildDate": "2026-08-20T06:16:00Z",
+  "forceUpdate": true,
+  "channel": "production",
+  "description": "Infinite dynamic level progression & Cloudflare CDN auto-update engine"
+}

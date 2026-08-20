@@ -13,54 +13,83 @@ const THEMES_ORDER: TrackTheme[] = [
   'SPACE',
 ];
 
-const TRACK_NAMES = [
-  'Emerald Rolling Hills',
-  'Sahara Dune Dash',
-  'Glacier Glide Canyon',
-  'Pacific Azure Archipelago',
-  'Magma Peak Circuit',
-  'Stratosphere Cloudway',
-  'Amazon Canopy Slalom',
-  'Cyber Gearworks Factory',
-  'Sugar Rush Wonderland',
-  'Supernova Cosmic Speedway',
-  'Neon Highway Zero-G',
-  'Cascade Falls Run',
-  'Crystal Cavern Descent',
-  'Balkan Mountain Pass',
-  'Kowloon High-Rise Bridge',
-  'Valkyrie Sky Fortress',
+const TRACK_ADJECTIVES = [
+  'Emerald', 'Sahara', 'Glacier', 'Pacific', 'Magma', 'Stratosphere', 'Amazon',
+  'Cyber', 'Sugar', 'Supernova', 'Neon', 'Cascade', 'Crystal', 'Balkan', 'Kowloon',
+  'Valkyrie', 'Astral', 'Thunder', 'Aurora', 'Solaris', 'Quantum', 'Obsidian',
+  'Hyperion', 'Mirage', 'Apex', 'Phantom', 'Zenith', 'Inferno', 'Titan', 'Vortex',
 ];
+
+const TRACK_NOUNS = [
+  'Rolling Hills', 'Dune Dash', 'Glide Canyon', 'Azure Archipelago', 'Peak Circuit',
+  'Cloudway', 'Canopy Slalom', 'Gearworks Factory', 'Wonderland', 'Cosmic Speedway',
+  'Highway Zero-G', 'Falls Run', 'Cavern Descent', 'Mountain Pass', 'High-Rise Bridge',
+  'Sky Fortress', 'Ridge Overdrive', 'Megaloop Sprint', 'Trench Velocity', 'Sector Speedway',
+];
+
+// Helper to convert integer to Roman numeral for infinite level titles
+function toRoman(num: number): string {
+  if (num <= 1) return 'I';
+  const val = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1];
+  const syms = ['M', 'CM', 'D', 'CD', 'C', 'XC', 'L', 'XL', 'X', 'IX', 'V', 'IV', 'I'];
+  let roman = '';
+  for (let i = 0; i < val.length; i++) {
+    while (num >= val[i]) {
+      roman += syms[i];
+      num -= val[i];
+    }
+  }
+  return roman;
+}
+
+// Simple seedable pseudo-random generator
+function createPRNG(seed: number) {
+  return function () {
+    let t = (seed += 0x6d2b79f5);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 export class TrackGenerator {
   public static generateTrack(level: number, racerCount = 16): Track {
+    const rng = createPRNG(level * 7919 + 1337);
+
+    // Pick Theme in repeating order but with procedural rotation
     const themeIndex = (level - 1) % THEMES_ORDER.length;
     const theme = THEMES_ORDER[themeIndex];
-    const nameIndex = (level - 1) % TRACK_NAMES.length;
-    const trackName = `${TRACK_NAMES[nameIndex]} ${level > TRACK_NAMES.length ? `II` : ''}`;
 
-    // Base difficulty scales with level
-    const difficulty = Math.min(10, 1 + Math.floor(level / 2));
-    const segmentCount = Math.min(22, 7 + Math.floor(level * 0.8));
+    // Generate Unique Track Name
+    const adjIndex = Math.floor(rng() * TRACK_ADJECTIVES.length);
+    const nounIndex = Math.floor(rng() * TRACK_NOUNS.length);
+    const cycle = Math.floor((level - 1) / THEMES_ORDER.length) + 1;
+    const suffix = cycle > 1 ? ` ${toRoman(cycle)}` : '';
+    const trackName = `${TRACK_ADJECTIVES[adjIndex]} ${TRACK_NOUNS[nounIndex]}${suffix}`;
+
+    // Base difficulty & segment count
+    const difficulty = Math.min(10, 1 + Math.floor(level * 0.4));
+    // Number of segments: 8 to 22
+    const segmentCount = Math.min(24, 8 + Math.floor(level * 0.7));
 
     const segments: TrackSegment[] = [];
     let currentX = 0;
-    let currentY = 12; // Start elevated so gravity pulls marbles down
+    let currentY = 16 + segmentCount * 2.2; // High enough start for steep gravity roll
     let currentZ = 0;
 
     // 1. Starting Grid Segment (Wide, gentle downslope with side rails)
     const startLength = 28;
     const startSegment: TrackSegment = {
-      id: 'seg_start',
+      id: `seg_start_lvl_${level}`,
       type: 'STRAIGHT',
       startX: currentX,
       startY: currentY,
       startZ: currentZ,
       endX: currentX,
-      endY: currentY - 4,
+      endY: currentY - 4.5,
       endZ: currentZ + startLength,
       width: 14,
-      wallHeight: 2.2,
+      wallHeight: 2.5,
       friction: 0.05,
       bounciness: 0.4,
       obstacles: [],
@@ -72,10 +101,9 @@ export class TrackGenerator {
     currentY = startSegment.endY;
     currentZ = startSegment.endZ;
 
-    // 2. Generate Spawn Positions on Starting Grid
+    // 2. Spawn Positions on Starting Grid
     const spawnPositions: { x: number; y: number; z: number }[] = [];
     const cols = 4;
-    const rows = Math.ceil(racerCount / cols);
     const spacingX = 2.4;
     const spacingZ = 2.8;
 
@@ -84,7 +112,7 @@ export class TrackGenerator {
       const row = Math.floor(i / cols);
       const offsetX = (col - (cols - 1) / 2) * spacingX;
       const offsetZ = 4 + row * spacingZ;
-      const offsetY = currentY + 4 - (offsetZ / startLength) * 4 + 1.2;
+      const offsetY = currentY + 4.5 - (offsetZ / startLength) * 4.5 + 1.2;
       spawnPositions.push({
         x: currentX + offsetX,
         y: offsetY,
@@ -92,71 +120,68 @@ export class TrackGenerator {
       });
     }
 
-    // 3. Procedural Sequence of Interesting Obstacle Segments
+    // 3. Procedural Sequence of Varied Track Sections
     for (let s = 1; s < segmentCount; s++) {
-      const segId = `seg_${s}`;
-      const isLaterSection = s > 3;
+      const segId = `seg_${level}_${s}`;
+      const isLaterSection = s > 2;
 
-      // Select segment archetype based on level and step
       let segType: TrackSegment['type'] = 'STRAIGHT';
       let surfaceType: TrackSegment['surfaceType'] = 'NORMAL';
-      let segWidth = 12;
-      let segLength = 24 + Math.random() * 8;
-      let dY = -2.5 - Math.random() * 2.5;
+      let segWidth = 11 + rng() * 3;
+      let segLength = 24 + rng() * 10;
+      let dY = -2.5 - rng() * 3.5;
       let dX = 0;
       const obstacles: ObstacleInstance[] = [];
 
-      const roll = Math.random();
+      const roll = rng();
 
-      if (roll < 0.2) {
-        // Curve Left / Right
-        const isLeft = Math.random() > 0.5;
+      if (roll < 0.22) {
+        // Curve Left / Right with Banked Pinball Bumpers
+        const isLeft = rng() > 0.5;
         segType = isLeft ? 'CURVE_LEFT' : 'CURVE_RIGHT';
-        dX = isLeft ? -12 : 12;
-        segLength = 28;
-        dY = -3.0;
+        dX = isLeft ? -(10 + rng() * 6) : 10 + rng() * 6;
+        segLength = 26 + rng() * 6;
+        dY = -3.2;
 
-        // Add pinball bumpers on outside of curves
         obstacles.push({
-          id: `obs_${s}_bumper`,
+          id: `obs_${level}_${s}_bumper`,
           type: 'BOUNCY_PADS',
-          x: currentX + dX * 0.5 + (isLeft ? 3 : -3),
+          x: currentX + dX * 0.5 + (isLeft ? 3.2 : -3.2),
           y: currentY + dY * 0.5 + 0.8,
           z: currentZ + segLength * 0.5,
           sizeX: 2.2,
-          sizeY: 1.2,
+          sizeY: 1.4,
           sizeZ: 2.2,
           rotation: 0,
           rotSpeed: 0,
           phase: 0,
         });
-      } else if (roll < 0.35 && isLaterSection) {
-        // Giant Funnel Bowl
+      } else if (roll < 0.38 && isLaterSection) {
+        // Giant Funnel Vortex Bowl
         segType = 'FUNNEL';
-        segWidth = 24;
+        segWidth = 22;
         segLength = 32;
-        dY = -5;
+        dY = -5.5;
         obstacles.push({
-          id: `obs_${s}_funnel`,
+          id: `obs_${level}_${s}_funnel`,
           type: 'FUNNEL',
           x: currentX,
           y: currentY + dY * 0.5,
           z: currentZ + segLength * 0.5,
           sizeX: 18,
-          sizeY: 4,
+          sizeY: 4.5,
           sizeZ: 18,
           rotation: 0,
-          rotSpeed: 0.02,
+          rotSpeed: 0.02 + level * 0.002,
           phase: 0,
         });
-      } else if (roll < 0.5) {
-        // Split Path: Main Safe Path vs Dangerous Speed Shortcut
+      } else if (roll < 0.54) {
+        // Split Path: Shortcut with Boost Pad vs Safe Lane
         segType = 'SPLIT';
         segLength = 30;
-        dY = -3.5;
-        // Speed Boost on shortcut side
+        dY = -3.8;
         obstacles.push({
-          id: `obs_${s}_boost`,
+          id: `obs_${level}_${s}_boost`,
           type: 'SPEED_RAMP',
           x: currentX - 4,
           y: currentY + dY * 0.3 + 0.2,
@@ -168,65 +193,63 @@ export class TrackGenerator {
           rotSpeed: 0,
           phase: 0,
         });
-      } else if (roll < 0.65) {
-        // Seesaw Bridge / Narrow Suspended Bridge
+      } else if (roll < 0.68) {
+        // Seesaw Mechanical Teeter-Totter
         segType = 'SEESAW';
         segWidth = 8;
         segLength = 26;
-        dY = -2;
+        dY = -2.2;
         obstacles.push({
-          id: `obs_${s}_seesaw`,
+          id: `obs_${level}_${s}_seesaw`,
           type: 'SEESAW',
           x: currentX,
           y: currentY - 1,
           z: currentZ + segLength * 0.5,
-          sizeX: 6,
+          sizeX: 6.5,
           sizeY: 0.6,
           sizeZ: 18,
           rotation: 0,
           rotSpeed: 0,
           phase: 0,
         });
-      } else if (roll < 0.8) {
+      } else if (roll < 0.82) {
         // Steep Slope with Giant Swinging Hammers or Spinning Wheels
         segType = 'SLOPE_DOWN';
-        dY = -6;
-        segLength = 26;
+        dY = -6.5;
+        segLength = 28;
 
-        if (level >= 2) {
-          const obsType: ObstacleType = Math.random() > 0.5 ? 'HAMMER' : 'SPINNING_WHEEL';
-          obstacles.push({
-            id: `obs_${s}_mach`,
-            type: obsType,
-            x: currentX,
-            y: currentY + dY * 0.5 + (obsType === 'HAMMER' ? 4 : 0.8),
-            z: currentZ + segLength * 0.5,
-            sizeX: obsType === 'HAMMER' ? 5 : 8,
-            sizeY: obsType === 'HAMMER' ? 2 : 1,
-            sizeZ: 2,
-            rotation: 0,
-            rotSpeed: 0.04 + level * 0.005,
-            phase: Math.random() * Math.PI * 2,
-            swingAngle: Math.PI * 0.35,
-          });
-        }
+        const obsType: ObstacleType = rng() > 0.5 ? 'HAMMER' : 'SPINNING_WHEEL';
+        obstacles.push({
+          id: `obs_${level}_${s}_mach`,
+          type: obsType,
+          x: currentX,
+          y: currentY + dY * 0.5 + (obsType === 'HAMMER' ? 4.2 : 0.8),
+          z: currentZ + segLength * 0.5,
+          sizeX: obsType === 'HAMMER' ? 5.5 : 8.5,
+          sizeY: obsType === 'HAMMER' ? 2.2 : 1,
+          sizeZ: 2,
+          rotation: 0,
+          rotSpeed: 0.04 + Math.min(0.06, level * 0.004),
+          phase: rng() * Math.PI * 2,
+          swingAngle: Math.PI * 0.38,
+        });
       } else {
-        // Elemental Zone (Ice, Mud, Water Rapids, Fire Zone)
+        // Elemental Surface Zone (Ice, Mud, Water, Neon Hyperdrive)
         segType = 'STRAIGHT';
         segLength = 26;
-        dY = -3;
+        dY = -3.2;
         if (theme === 'ICE_WORLD') surfaceType = 'ICE';
         else if (theme === 'OCEAN') surfaceType = 'WATER';
         else if (theme === 'VOLCANO') surfaceType = 'NEON';
         else if (theme === 'DESERT') surfaceType = 'MUD';
-        else surfaceType = Math.random() > 0.5 ? 'ICE' : 'BOOST';
+        else surfaceType = rng() > 0.5 ? 'ICE' : 'BOOST';
 
-        // Add giant fans or trapdoors
-        if (level >= 3) {
+        // Add giant fans
+        if (level >= 2) {
           obstacles.push({
-            id: `obs_${s}_fan`,
+            id: `obs_${level}_${s}_fan`,
             type: 'GIANT_FAN',
-            x: currentX + (Math.random() > 0.5 ? 6 : -6),
+            x: currentX + (rng() > 0.5 ? 5.5 : -5.5),
             y: currentY + dY * 0.5 + 1.5,
             z: currentZ + segLength * 0.5,
             sizeX: 4,
@@ -239,12 +262,12 @@ export class TrackGenerator {
         }
       }
 
-      // Add pinball obstacles / pins inside wide straight sections
-      if (segWidth >= 10 && Math.random() > 0.6) {
+      // Add pinball obstacles in wide straight sections
+      if (segWidth >= 10 && rng() > 0.55) {
         obstacles.push({
-          id: `obs_${s}_pin_1`,
+          id: `obs_${level}_${s}_pin_1`,
           type: 'PINS',
-          x: currentX - 2.5,
+          x: currentX - 2.8,
           y: currentY + dY * 0.5 + 0.8,
           z: currentZ + segLength * 0.3,
           sizeX: 1.2,
@@ -255,9 +278,9 @@ export class TrackGenerator {
           phase: 0,
         });
         obstacles.push({
-          id: `obs_${s}_pin_2`,
+          id: `obs_${level}_${s}_pin_2`,
           type: 'PINS',
-          x: currentX + 2.5,
+          x: currentX + 2.8,
           y: currentY + dY * 0.5 + 0.8,
           z: currentZ + segLength * 0.6,
           sizeX: 1.2,
@@ -279,7 +302,7 @@ export class TrackGenerator {
         endY: currentY + dY,
         endZ: currentZ + segLength,
         width: segWidth,
-        wallHeight: 1.8,
+        wallHeight: 1.9,
         friction: surfaceType === 'ICE' ? 0.005 : surfaceType === 'MUD' ? 0.25 : 0.04,
         bounciness: 0.45,
         obstacles,
@@ -295,41 +318,41 @@ export class TrackGenerator {
     // 4. Final Sprint & Checkered Finish Line Segment
     const finishLength = 36;
     const finishSegment: TrackSegment = {
-      id: 'seg_finish',
+      id: `seg_finish_lvl_${level}`,
       type: 'STRAIGHT',
       startX: currentX,
       startY: currentY,
       startZ: currentZ,
       endX: currentX,
-      endY: currentY - 3,
+      endY: currentY - 3.5,
       endZ: currentZ + finishLength,
       width: 14,
-      wallHeight: 2.5,
+      wallHeight: 2.6,
       friction: 0.06,
       bounciness: 0.5,
       obstacles: [
-        // Dual boost pads for thrilling final sprint!
+        // Dual boost ramps leading into the grand finale
         {
-          id: 'obs_final_boost_l',
+          id: `obs_final_boost_l_${level}`,
           type: 'SPEED_RAMP',
-          x: currentX - 3,
-          y: currentY - 1,
+          x: currentX - 3.2,
+          y: currentY - 1.2,
           z: currentZ + 8,
           sizeX: 2.4,
-          sizeY: 0.2,
+          sizeY: 0.25,
           sizeZ: 4.5,
           rotation: 0,
           rotSpeed: 0,
           phase: 0,
         },
         {
-          id: 'obs_final_boost_r',
+          id: `obs_final_boost_r_${level}`,
           type: 'SPEED_RAMP',
-          x: currentX + 3,
-          y: currentY - 1,
+          x: currentX + 3.2,
+          y: currentY - 1.2,
           z: currentZ + 8,
           sizeX: 2.4,
-          sizeY: 0.2,
+          sizeY: 0.25,
           sizeZ: 4.5,
           rotation: 0,
           rotSpeed: 0,

@@ -155,6 +155,47 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         const dt = rawDt * settings.simulationSpeed;
 
         if (isRacingRef.current && !isFinishedRef.current) {
+          const finalizeRace = (winningRacer: RacerState) => {
+            if (isFinishedRef.current) return;
+            isFinishedRef.current = true;
+            sound.playVictoryFanfare();
+
+            // Compute podium & results
+            const sorted = racersRef.current.slice().sort((a, b) => {
+              if (a.isFinished && b.isFinished) return (a.finishRank || 99) - (b.finishRank || 99);
+              if (a.isFinished) return -1;
+              if (b.isFinished) return 1;
+              return b.z - a.z;
+            });
+
+            const raceDuration = (Date.now() - raceStartTimeRef.current) / 1000;
+            const result: RaceResult = {
+              winner: winningRacer.ballDef,
+              level,
+              trackName: trackRef.current?.name || `Track ${level}`,
+              theme: trackRef.current?.theme || 'GRASSLAND',
+              raceDuration,
+              totalRacers: racersRef.current.length,
+              eliminatedCount: racersRef.current.filter((r) => r.isEliminated).length,
+              podium: sorted.slice(0, 3).map((r, idx) => ({
+                rank: idx + 1,
+                racer: r.ballDef,
+                finishTime: raceDuration + idx * 0.4,
+                points: idx === 0 ? 100 : idx === 1 ? 70 : 50,
+              })),
+              allFinishers: sorted.map((r, idx) => ({
+                rank: idx + 1,
+                racer: r.ballDef,
+                finishTime: r.isFinished ? raceDuration + idx * 0.3 : undefined,
+                points: Math.max(10, 100 - idx * 8),
+                isEliminated: r.isEliminated,
+              })),
+            };
+
+            SaveManager.recordRaceResult(result);
+            onRaceFinish(result);
+          };
+
           // Physics step
           physicsEngineRef.current.update(
             racersRef.current,
@@ -169,47 +210,21 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             },
             (racer, rank) => {
               // Finisher!
-              if (rank === 1 && !isFinishedRef.current) {
-                isFinishedRef.current = true;
-                sound.playVictoryFanfare();
-
-                // Compute podium & results
-                const sorted = racersRef.current.slice().sort((a, b) => {
-                  if (a.isFinished && b.isFinished) return (a.finishRank || 99) - (b.finishRank || 99);
-                  if (a.isFinished) return -1;
-                  if (b.isFinished) return 1;
-                  return b.z - a.z;
-                });
-
-                const raceDuration = (Date.now() - raceStartTimeRef.current) / 1000;
-                const result: RaceResult = {
-                  winner: racer.ballDef,
-                  level,
-                  trackName: trackRef.current?.name || `Track ${level}`,
-                  theme: trackRef.current?.theme || 'GRASSLAND',
-                  raceDuration,
-                  totalRacers: racersRef.current.length,
-                  eliminatedCount: racersRef.current.filter((r) => r.isEliminated).length,
-                  podium: sorted.slice(0, 3).map((r, idx) => ({
-                    rank: idx + 1,
-                    racer: r.ballDef,
-                    finishTime: raceDuration + idx * 0.4,
-                    points: idx === 0 ? 100 : idx === 1 ? 70 : 50,
-                  })),
-                  allFinishers: sorted.map((r, idx) => ({
-                    rank: idx + 1,
-                    racer: r.ballDef,
-                    finishTime: r.isFinished ? raceDuration + idx * 0.3 : undefined,
-                    points: Math.max(10, 100 - idx * 8),
-                    isEliminated: r.isEliminated,
-                  })),
-                };
-
-                SaveManager.recordRaceResult(result);
-                onRaceFinish(result);
+              if (rank === 1) {
+                finalizeRace(racer);
               }
             }
           );
+
+          // Safety Watchdog: If all alive racers fell off or timeout > 40s, auto-crown top distance racer
+          const raceDuration = (Date.now() - raceStartTimeRef.current) / 1000;
+          const aliveRacers = racersRef.current.filter((r) => !r.isEliminated);
+          if (aliveRacers.length === 0 || raceDuration > 45) {
+            const bestRacer = racersRef.current.slice().sort((a, b) => b.z - a.z)[0];
+            if (bestRacer) {
+              finalizeRace(bestRacer);
+            }
+          }
 
           // Random Special Events Trigger (12% chance every 10 seconds of race)
           if (Math.random() < 0.003 && !activeEventRef.current) {

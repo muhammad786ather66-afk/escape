@@ -3,8 +3,30 @@ import { ALL_COUNTRYBALLS } from './countryballsData';
 
 const SETTINGS_KEY = 'countryballs_marble_settings_v1';
 const LEADERBOARD_KEY = 'countryballs_marble_leaderboard_v1';
+const CURRENT_LEVEL_KEY = 'countryballs_marble_current_level_v1';
 
 export class SaveManager {
+  public static loadCurrentLevel(): number {
+    try {
+      const saved = localStorage.getItem(CURRENT_LEVEL_KEY);
+      if (saved) {
+        const parsed = parseInt(saved, 10);
+        if (!isNaN(parsed) && parsed >= 1) return parsed;
+      }
+    } catch (e) {
+      console.warn('Failed to load level from storage', e);
+    }
+    return 1;
+  }
+
+  public static saveCurrentLevel(level: number) {
+    try {
+      localStorage.setItem(CURRENT_LEVEL_KEY, level.toString());
+    } catch (e) {
+      console.warn('Failed to save level', e);
+    }
+  }
+
   public static loadSettings(): GameSettings {
     try {
       const saved = localStorage.getItem(SETTINGS_KEY);

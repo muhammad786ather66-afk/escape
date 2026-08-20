@@ -1,6 +1,7 @@
-import React from 'react';
-import { Settings as SettingsIcon, X, Volume2, VolumeX, Music, FastForward, Clock, Keyboard } from 'lucide-react';
+import React, { useState } from 'react';
+import { Settings as SettingsIcon, X, Volume2, VolumeX, Music, FastForward, Clock, Keyboard, CloudLightning, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { GameSettings } from '../types';
+import { versionChecker, CLIENT_VERSION } from '../game/versionChecker';
 
 interface SettingsModalProps {
   settings: GameSettings;
@@ -13,6 +14,31 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onUpdateSettings,
   onClose,
 }) => {
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+  const [updateStatusText, setUpdateStatusText] = useState<string | null>(null);
+
+  const handleCheckUpdate = async () => {
+    setIsCheckingUpdate(true);
+    setUpdateStatusText('Checking Cloudflare CDN...');
+    try {
+      const hasNew = await versionChecker.checkServerVersion();
+      if (hasNew) {
+        setUpdateStatusText('New version found! Reloading...');
+        setTimeout(() => {
+          versionChecker.forceHardReload();
+        }, 800);
+      } else {
+        setUpdateStatusText('You are running the latest version.');
+        setTimeout(() => setUpdateStatusText(null), 3000);
+      }
+    } catch (e) {
+      setUpdateStatusText('Check failed (offline or network error).');
+      setTimeout(() => setUpdateStatusText(null), 3000);
+    } finally {
+      setIsCheckingUpdate(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in select-none">
       <div className="bg-slate-900/95 border border-white/15 rounded-3xl p-5 sm:p-7 max-w-lg w-full shadow-2xl relative overflow-hidden flex flex-col">
@@ -106,6 +132,35 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               }
               className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
             />
+          </div>
+
+          {/* Cloudflare Live Auto-Update Section */}
+          <div className="bg-emerald-950/40 rounded-2xl border border-emerald-500/30 p-3 text-xs font-mono text-emerald-300">
+            <div className="flex items-center justify-between mb-2">
+              <div className="font-bold uppercase tracking-wider flex items-center gap-1.5 text-emerald-200">
+                <CloudLightning size={16} className="text-emerald-400" />
+                <span>CLOUDFLARE LIVE AUTO-SYNC</span>
+              </div>
+              <span className="text-[10px] bg-emerald-900/60 px-2 py-0.5 rounded-full border border-emerald-400/30">
+                v{CLIENT_VERSION}
+              </span>
+            </div>
+            <p className="text-[11px] text-gray-300 mb-2.5">
+              When new builds deploy, browsers are automatically refreshed with cache-busting on the next level transition.
+            </p>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] text-emerald-400">
+                {updateStatusText || 'Auto-polling active every 30s'}
+              </span>
+              <button
+                onClick={handleCheckUpdate}
+                disabled={isCheckingUpdate}
+                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] flex items-center gap-1.5 active:scale-95 transition cursor-pointer disabled:opacity-50 shadow"
+              >
+                <RefreshCw size={12} className={isCheckingUpdate ? 'animate-spin' : ''} />
+                <span>Check Now</span>
+              </button>
+            </div>
           </div>
 
           {/* Keyboard Shortcuts Reference */}

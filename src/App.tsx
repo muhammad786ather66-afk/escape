@@ -8,6 +8,8 @@ import { SettingsModal } from './components/SettingsModal';
 import { MainMenu } from './components/MainMenu';
 import { SaveManager } from './game/saveManager';
 import { sound } from './game/audioSynth';
+import { versionChecker, VersionInfo, CLIENT_VERSION } from './game/versionChecker';
+import { RefreshCw, Sparkles } from 'lucide-react';
 import {
   GameSettings,
   RaceResult,
@@ -19,13 +21,31 @@ import {
 
 export function App() {
   const [gameState, setGameState] = useState<'MENU' | 'RACING'>('MENU');
-  const [level, setLevel] = useState<number>(1);
+  const [level, setLevel] = useState<number>(() => SaveManager.loadCurrentLevel());
   const [settings, setSettings] = useState<GameSettings>(() => SaveManager.loadSettings());
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>(() => SaveManager.loadLeaderboard());
   const [isPaused, setIsPaused] = useState<boolean>(false);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [activeModal, setActiveModal] = useState<'LEADERBOARD' | 'ROSTER' | 'SETTINGS' | null>(null);
   const [raceResult, setRaceResult] = useState<RaceResult | null>(null);
+  const [updateInfo, setUpdateInfo] = useState<VersionInfo | null>(null);
+
+  // Start Cloudflare version update polling
+  useEffect(() => {
+    versionChecker.startPeriodicPolling(30000);
+    const unsubscribe = versionChecker.onUpdateDetected((info) => {
+      setUpdateInfo(info);
+    });
+    return () => {
+      unsubscribe();
+      versionChecker.stopPeriodicPolling();
+    };
+  }, []);
+
+  // Save current level when level changes
+  useEffect(() => {
+    SaveManager.saveCurrentLevel(level);
+  }, [level]);
 
   // HUD telemetry state
   const [hudData, setHudData] = useState<{
@@ -86,7 +106,21 @@ export function App() {
   const handleNextRace = () => {
     setRaceResult(null);
     setIsPaused(false);
+
+    // If Cloudflare has deployed a new build version, seamlessly hard-reload on level transition
+    if (versionChecker.hasUpdateAvailable) {
+      const nextLevel = level + 1;
+      SaveManager.saveCurrentLevel(nextLevel);
+      versionChecker.forceHardReload();
+      return;
+    }
+
     setLevel((prev) => prev + 1);
+  };
+
+  const handleManualForceUpdate = () => {
+    SaveManager.saveCurrentLevel(level);
+    versionChecker.forceHardReload();
   };
 
   const handleUpdateSettings = (newSettings: GameSettings) => {
@@ -144,6 +178,25 @@ export function App() {
 
   return (
     <div className="w-screen h-screen overflow-hidden bg-slate-950 relative font-sans">
+      {/* Cloudflare Auto-Update Live Notification Banner */}
+      {updateInfo && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-50 pointer-events-auto animate-bounce">
+          <div className="bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 text-white text-xs sm:text-sm font-bold px-4 py-2 rounded-2xl shadow-[0_0_30px_rgba(16,185,129,0.5)] border border-emerald-300/40 flex items-center gap-3">
+            <Sparkles size={16} className="text-amber-300 animate-spin" />
+            <span>
+              Cloudflare update available (v{updateInfo.version}). Auto-syncing on next level!
+            </span>
+            <button
+              onClick={handleManualForceUpdate}
+              className="px-2.5 py-1 rounded-xl bg-white text-slate-950 font-black text-xs uppercase tracking-wider hover:bg-emerald-100 active:scale-95 transition cursor-pointer flex items-center gap-1 shadow"
+            >
+              <RefreshCw size={12} className="animate-spin" />
+              Update Now
+            </button>
+          </div>
+        </div>
+      )}
+
       {gameState === 'MENU' && (
         <MainMenu
           onStartRace={handleStartRace}
