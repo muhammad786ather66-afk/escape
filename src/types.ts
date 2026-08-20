@@ -1,204 +1,170 @@
+export type CameraMode = 'LEADER_LOCK' | 'PACK_VIEW' | 'OVERVIEW';
+
+export type GameMode = 'AUTO_PILOT' | 'INTERACTIVE';
+
 export type TrackTheme =
   | 'GRASSLAND'
   | 'DESERT'
-  | 'ICE_WORLD'
+  | 'CYBER_NEON'
+  | 'ICE_GLACIER'
   | 'VOLCANO'
-  | 'OCEAN'
-  | 'SKY'
-  | 'SPACE'
-  | 'JUNGLE'
+  | 'SPACE_COSMOS'
   | 'FACTORY'
-  | 'CANDY_WORLD';
-
-export type ObstacleType =
-  | 'HAMMER'
-  | 'SPINNING_WHEEL'
-  | 'FUNNEL'
-  | 'TRAP_DOORS'
-  | 'BOUNCY_PADS'
-  | 'MOVING_BRIDGE'
-  | 'FIRE_ZONE'
-  | 'ICE_ZONE'
-  | 'WATER_CURRENT'
-  | 'GIANT_FAN'
-  | 'ROTATING_ARM'
-  | 'FALLING_ROCKS'
-  | 'CANNON'
-  | 'COLOR_GATES'
-  | 'SEESAW'
-  | 'PINS'
-  | 'SPEED_RAMP'
-  | 'SPIRAL'
-  | 'SPLIT_PATH'
-  | 'NARROW_BRIDGE';
-
-export type CameraMode = 'LEADER' | 'PACK' | 'ACTION' | 'FINISH_LINE' | 'FREE_ORBIT' | 'TOP_DOWN';
-
-export type RaceEventType =
-  | 'SUPER_SPEED'
-  | 'GIANT_HAMMER'
-  | 'SLIPPERY_ICE'
-  | 'EARTHQUAKE'
-  | 'LOW_GRAVITY'
-  | 'FINAL_SPRINT'
-  | 'CHAOS_STORM';
+  | 'CANDY_LAND'
+  | 'JUNGLE'
+  | 'SYNTHWAVE';
 
 export interface CountryballDef {
   id: string;
   name: string;
   code: string;
-  flagCode: string;
+  flagEmoji: string;
   primaryColor: string;
   secondaryColor: string;
-  accentColor?: string;
-  patternType: 'stripes_h' | 'stripes_v' | 'cross' | 'circle' | 'canton' | 'triangle' | 'sun' | 'stars' | 'diagonal';
-  eyeStyle: 'happy' | 'determined' | 'derp' | 'cool' | 'shocked' | 'intense';
-  personality: string;
-  description: string;
-  // Physics attributes
-  mass: number;          // 0.8 to 1.3
-  restitution: number;   // 0.6 to 0.9 (bounciness)
-  topSpeed: number;      // 1.0 to 1.3
-  grip: number;          // 0.8 to 1.2
-  specialTrait: string;
+  accentColor: string;
+  accessory:
+    | 'FEZ'
+    | 'STAHLHELM'
+    | 'BERET'
+    | 'HEADBAND'
+    | 'SUNGLASSES'
+    | 'HACHIMAKI'
+    | 'TOP_HAT'
+    | 'CHEF_HAT'
+    | 'PLUNGER'
+    | 'USHANKA'
+    | 'SOMBRERO'
+    | 'SUN_CAP'
+    | 'MATADOR'
+    | 'VIKING'
+    | 'TURBAN'
+    | 'CORK_HAT';
+  trait: string;
+  speedMultiplier: number;
+  bounceMultiplier: number;
+  weightMultiplier: number;
 }
 
 export interface RacerState {
   id: string;
-  ballDef: CountryballDef;
+  ball: CountryballDef;
   x: number;
   y: number;
-  z: number;
   vx: number;
   vy: number;
-  vz: number;
-  rotX: number;
-  rotY: number;
-  rotZ: number;
-  vRotX: number;
-  vRotY: number;
-  vRotZ: number;
   radius: number;
-  isEliminated: boolean;
-  eliminationReason?: string;
-  isFinished: boolean;
-  finishTime?: number;
-  finishRank?: number;
+  mass: number;
+  bounciness: number;
+  rotation: number;
+  angularVelocity: number;
+  squishX: number;
+  squishY: number;
+  distance: number;
   rank: number;
-  distanceProgress: number; // progress along track 0..1
+  isFinished: boolean;
+  finishRank?: number;
+  finishTime?: number;
+  isEliminated: boolean;
+  trailHistory: { x: number; y: number; alpha: number }[];
   stuckTimer: number;
-  lastProgressZ: number;
-  squashX: number;
-  squashY: number;
-  squashZ: number;
-  trailPoints: { x: number; y: number; z: number; alpha: number }[];
+  lastY: number;
   boostTimer: number;
-  iceTimer: number;
-  fireTimer: number;
-  colorFlash?: string;
+  color: string;
 }
 
-export interface ObstacleInstance {
+export type ObstacleType =
+  | 'PINBALL_BUMPER'
+  | 'SPINNING_HAMMER'
+  | 'ROTATING_BAR'
+  | 'BOOST_PAD'
+  | 'BOUNCY_MUSHROOM'
+  | 'LASER_GATE'
+  | 'VORTEX_FUNNEL'
+  | 'SEESAW'
+  | 'WIND_FAN'
+  | 'ICE_PATCH'
+  | 'MUD_PATCH';
+
+export interface Obstacle {
   id: string;
   type: ObstacleType;
   x: number;
   y: number;
-  z: number;
-  sizeX: number;
-  sizeY: number;
-  sizeZ: number;
+  width?: number;
+  height?: number;
+  radius?: number;
   rotation: number;
-  rotSpeed: number;
-  phase: number;
-  swingAngle?: number;
-  isOpen?: boolean;
-  customData?: Record<string, number | boolean | string>;
+  rotationSpeed: number;
+  length?: number;
+  power?: number;
+  state?: number;
+  laserActive?: boolean;
+  phase?: number;
+  customData?: any;
 }
 
-export interface TrackSegment {
-  id: string;
-  type: 'STRAIGHT' | 'CURVE_LEFT' | 'CURVE_RIGHT' | 'SLOPE_DOWN' | 'SLOPE_UP' | 'FUNNEL' | 'SPLIT' | 'MERGE' | 'SPIRAL' | 'JUMP_GAP' | 'SEESAW' | 'NARROW';
-  startX: number;
-  startY: number;
-  startZ: number;
-  endX: number;
-  endY: number;
-  endZ: number;
-  width: number;
-  wallHeight: number;
-  friction: number;
-  bounciness: number;
-  obstacles: ObstacleInstance[];
-  surfaceType: 'NORMAL' | 'ICE' | 'MUD' | 'BOOST' | 'WATER' | 'WOOD' | 'NEON';
-  isShortcut?: boolean;
+export interface TrackWall {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  isBouncy?: boolean;
+  color?: string;
 }
 
-export interface Track {
-  id: string;
+export interface TrackData {
   level: number;
   name: string;
   theme: TrackTheme;
   difficulty: number;
-  totalLength: number;
-  segments: TrackSegment[];
-  spawnPositions: { x: number; y: number; z: number }[];
-  finishZ: number;
+  width: number;
+  height: number;
+  startX: number;
+  startY: number;
+  finishY: number;
+  walls: TrackWall[];
+  obstacles: Obstacle[];
+  decorations: { x: number; y: number; type: string; size: number }[];
+  backgroundGradient: [string, string, string];
+  accentColor: string;
+  railColor: string;
 }
 
-export interface ActiveRaceEvent {
-  type: RaceEventType;
-  title: string;
-  description: string;
-  duration: number;
-  remainingTime: number;
+export interface Particle {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  color: string;
+  size: number;
+  alpha: number;
+  life: number;
+  maxLife: number;
+  shape?: 'CIRCLE' | 'STAR' | 'SPARK' | 'CONFETTI';
 }
 
-export interface LeaderboardEntry {
-  countryId: string;
-  name: string;
-  flagCode: string;
-  primaryColor: string;
-  wins: number;
-  top3: number;
-  racesRun: number;
-  totalPoints: number;
-  bestTime?: number;
-  highestLevelWon?: number;
+export interface UserBoostPad {
+  x: number;
+  y: number;
+  radius: number;
+  life: number;
+  maxLife: number;
+  power: number;
 }
 
-export interface GameSettings {
-  soundVolume: number;      // 0..1
-  musicVolume: number;      // 0..1
-  sfxEnabled: boolean;
-  musicEnabled: boolean;
-  simulationSpeed: number;  // 0.5, 1, 1.5, 2, 3
-  cameraMode: CameraMode;
-  showNames: boolean;
-  showTrails: boolean;
-  autoAdvanceDelay: number; // seconds to wait on podium before next race
-  particleDensity: 'LOW' | 'MED' | 'HIGH';
-  selectedCountryIds?: string[]; // null or array of enabled racer IDs
-}
-
-export interface RaceResult {
+export interface RaceWinnerInfo {
   winner: CountryballDef;
   level: number;
   trackName: string;
   theme: TrackTheme;
-  raceDuration: number;
-  totalRacers: number;
-  eliminatedCount: number;
-  podium: {
-    rank: number;
-    racer: CountryballDef;
-    finishTime: number;
-    points: number;
-  }[];
-  allFinishers: {
-    rank: number;
-    racer: CountryballDef;
-    finishTime?: number;
-    points: number;
-    isEliminated: boolean;
-  }[];
+  finishTime: number;
+  podium: { rank: number; ball: CountryballDef; finishTime: number }[];
+}
+
+export interface LeaderboardStats {
+  countryId: string;
+  wins: number;
+  podiums: number;
+  totalPoints: number;
+  racesCount: number;
 }

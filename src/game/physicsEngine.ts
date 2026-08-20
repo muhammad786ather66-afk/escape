@@ -1,388 +1,476 @@
-import { Track, RacerState, TrackSegment, ActiveRaceEvent, ObstacleInstance } from '../types';
+import { RacerState, TrackData, Obstacle, Particle, UserBoostPad } from '../types';
 import { sound } from './audioSynth';
 
 export class PhysicsEngine {
-  private gravity = -22.0;
+  private gravity = 0.38;
+  private airFriction = 0.992;
+  private ballRestitution = 0.75;
+  private wallRestitution = 0.7;
 
   public update(
     racers: RacerState[],
-    track: Track,
+    track: TrackData,
+    userBoostPads: UserBoostPad[],
+    particles: Particle[],
     dt: number,
-    activeEvent: ActiveRaceEvent | null,
-    onCollision?: (intensity: number, mat: 'wood' | 'metal' | 'glass' | 'rubber') => void,
-    onElimination?: (racer: RacerState, reason: string) => void,
-    onFinished?: (racer: RacerState, rank: number) => void
+    onFinisher: (racer: RacerState, rank: number) => void
   ) {
-    // Modify gravity or speed based on active global event
-    let effGravity = this.gravity;
-    let speedMult = 1.0;
-    if (activeEvent) {
-      if (activeEvent.type === 'LOW_GRAVITY') effGravity = -9.8;
-      if (activeEvent.type === 'SUPER_SPEED' || activeEvent.type === 'FINAL_SPRINT') speedMult = 1.45;
+    const clampedDt = Math.min(1.8, Math.max(0.2, dt));
+
+    // 1. Update Obstacles Animation (Rotations, Lasers)
+    for (const obs of track.obstacles) {
+      if (obs.rotationSpeed !== 0) {
+        obs.rotation += obs.rotationSpeed * clampedDt;
+      }
+      if (obs.type === 'LASER_GATE' && obs.phase !== undefined) {
+        obs.phase += 0.05 * clampedDt;
+        obs.laserActive = Math.sin(obs.phase) > -0.2;
+      }
     }
 
-    const aliveRacers = racers.filter((r) => !r.isEliminated);
-
-    // 1. Update individual racer physics
-    for (const racer of aliveRacers) {
-      if (racer.isFinished) continue;
+    // 2. Update Racers Physics
+    for (let i = 0; i < racers.length; i++) {
+      const racer = racers[i];
+      if (racer.isEliminated) continue;
 
       // Apply Gravity
-      racer.vy += effGravity * dt;
+      racer.vy += this.gravity * racer.ball.weightMultiplier * clampedDt;
 
-      // Find current track segment
-      const seg = this.findSegmentForZ(track, racer.z);
-      if (seg) {
-        this.resolveTrackSurfaceCollision(racer, seg, dt, activeEvent, onCollision);
+      // Apply Air Friction
+      racer.vx *= this.airFriction;
+      racer.vy *= this.airFriction;
+
+      // Speed limits
+      const maxSpeed = 32 * racer.ball.speedMultiplier;
+      const currentSpeed = Math.hypot(racer.vx, racer.vy);
+      if (currentSpeed > maxSpeed) {
+        const ratio = maxSpeed / currentSpeed;
+        racer.vx *= ratio;
+        racer.vy *= ratio;
       }
 
-      // Check obstacle collisions
-      if (seg && seg.obstacles.length > 0) {
-        this.resolveObstacleCollisions(racer, seg.obstacles, dt, activeEvent, onCollision);
+      // Position update
+      racer.x += racer.vx * clampedDt;
+      racer.y += racer.vy * clampedDt;
+
+      // Angular velocity and ball rolling rotation
+      racer.rotation += (racer.vx / racer.radius) * clampedDt * 0.8;
+
+      // Squash and stretch decay
+      racer.squishX += (1 - racer.squishX) * 0.15 * clampedDt;
+      racer.squishY += (1 - racer.squishY) * 0.15 * clampedDt;
+
+      // Trail particle generation for lead/fast balls
+      if (currentSpeed > 8) {
+        racer.trailHistory.unshift({ x: racer.x, y: racer.y, alpha: 0.65 });
+        if (racer.trailHistory.length > 8) {
+          racer.trailHistory.pop();
+        }
+      } else if (racer.trailHistory.length > 0) {
+        racer.trailHistory.pop();
       }
 
-      // Trait / Personality modifier integration
-      if (racer.ballDef.id === 'germany' && Math.abs(racer.vx) < 1.0) {
-        // Autobahn straight line acceleration
-        racer.vz += 3.5 * dt;
-      }
-      if (racer.ballDef.id === 'japan') {
-        // High stability center lock
-        racer.vx *= 0.96;
-      }
-
-      // Apply Boost timers
+      // Boost timer decay
       if (racer.boostTimer > 0) {
-        racer.boostTimer -= dt;
-        racer.vz += 14.0 * dt * speedMult;
+        racer.boostTimer -= clampedDt;
+        // Boost sparks
+        if (Math.random() < 0.3) {
+          particles.push({
+            x: racer.x + (Math.random() * 10 - 5),
+            y: racer.y + (Math.random() * 10 - 5),
+            vx: -racer.vx * 0.3 + (Math.random() * 4 - 2),
+            vy: -racer.vy * 0.3 + (Math.random() * 4 - 2),
+            color: '#38bdf8',
+            size: 4 + Math.random() * 4,
+            alpha: 1,
+            life: 0,
+            maxLife: 20,
+            shape: 'SPARK',
+          });
+        }
       }
 
-      // Integrate positions
-      racer.x += racer.vx * dt * speedMult;
-      racer.y += racer.vy * dt * speedMult;
-      racer.z += racer.vz * dt * speedMult;
-
-      // Roll rotations (Euler spin)
-      const rollSpeed = Math.sqrt(racer.vx * racer.vx + racer.vz * racer.vz) / racer.radius;
-      racer.rotX += rollSpeed * dt * (racer.vz > 0 ? 1 : -1);
-      racer.rotZ -= (racer.vx / racer.radius) * dt;
-
-      // Squash and stretch spring decay
-      racer.squashX += (1.0 - racer.squashX) * 12.0 * dt;
-      racer.squashY += (1.0 - racer.squashY) * 12.0 * dt;
-      racer.squashZ += (1.0 - racer.squashZ) * 12.0 * dt;
-
-      // Track trail points
-      if (Math.abs(racer.vz) > 5) {
-        racer.trailPoints.unshift({ x: racer.x, y: racer.y - 0.2, z: racer.z, alpha: 0.8 });
-        if (racer.trailPoints.length > 18) racer.trailPoints.pop();
-      }
-      for (const pt of racer.trailPoints) {
-        pt.alpha -= dt * 1.5;
+      // Track Wall Collisions
+      for (const wall of track.walls) {
+        this.resolveWallCollision(racer, wall, particles);
       }
 
-      // Distance progress
-      racer.distanceProgress = Math.min(1.0, Math.max(0.0, racer.z / track.totalLength));
+      // Obstacle Collisions
+      for (const obs of track.obstacles) {
+        this.resolveObstacleCollision(racer, obs, particles);
+      }
 
-      // Check finish line crossing
-      if (racer.z >= track.finishZ && !racer.isFinished) {
+      // User Boost Pad Collisions
+      for (const pad of userBoostPads) {
+        const dist = Math.hypot(racer.x - pad.x, racer.y - pad.y);
+        if (dist < racer.radius + pad.radius) {
+          racer.vy += pad.power;
+          racer.boostTimer = 40;
+          sound.playBoost();
+          this.createExplosionSparks(particles, pad.x, pad.y, '#38bdf8', 12);
+        }
+      }
+
+      // Finish Line Detection
+      if (!racer.isFinished && racer.y >= track.finishY) {
         racer.isFinished = true;
         const finishedCount = racers.filter((r) => r.isFinished).length;
         racer.finishRank = finishedCount;
-        racer.rank = finishedCount;
-        sound.playFinishChime();
-        if (onFinished) onFinished(racer, finishedCount);
+        sound.playFinishHorn();
+        onFinisher(racer, finishedCount);
+
+        // Celebration confetti burst for winner
+        if (finishedCount === 1) {
+          this.createConfetti(particles, racer.x, racer.y, 40);
+        }
       }
 
-      // 2. Anti-Stuck & Fall-Off Eliminator Watchdog
-      const minTrackY = seg ? Math.min(seg.startY, seg.endY) - 16 : -30;
-      if (racer.y < minTrackY) {
-        // Fallen off track!
-        racer.isEliminated = true;
-        racer.eliminationReason = 'Fell off track';
-        sound.playElimination();
-        if (onElimination) onElimination(racer, 'Fell off track');
-        continue;
-      }
+      // Distance score for leaderboard sorting
+      racer.distance = racer.y;
 
-      // Monitor forward velocity for anti-stuck
-      if (Math.abs(racer.z - racer.lastProgressZ) < 0.4 && Math.abs(racer.vz) < 1.0) {
-        racer.stuckTimer += dt;
-        if (racer.stuckTimer > 3.0) {
-          // Apply smart forward nudge impulse
-          racer.vz += 12.0 + Math.random() * 6.0;
-          racer.vy += 4.0;
-          racer.vx += (Math.random() - 0.5) * 4.0;
+      // Anti-Stuck System (Safety Watchdog)
+      if (Math.abs(racer.y - racer.lastY) < 1.5 && !racer.isFinished) {
+        racer.stuckTimer += clampedDt;
+        if (racer.stuckTimer > 70) {
+          // Give an automatic forward/lateral impulse
+          racer.vx += (Math.random() * 8 - 4);
+          racer.vy += 6 + Math.random() * 4;
           racer.stuckTimer = 0;
         }
       } else {
-        racer.lastProgressZ = racer.z;
         racer.stuckTimer = 0;
+        racer.lastY = racer.y;
       }
     }
 
-    // 3. Sphere-Sphere Elastic/Plastic Collisions between racers
-    for (let i = 0; i < aliveRacers.length; i++) {
-      const rA = aliveRacers[i];
-      if (rA.isFinished) continue;
-
-      for (let j = i + 1; j < aliveRacers.length; j++) {
-        const rB = aliveRacers[j];
-        if (rB.isFinished) continue;
-
-        const dx = rB.x - rA.x;
-        const dy = rB.y - rA.y;
-        const dz = rB.z - rA.z;
-        const distSq = dx * dx + dy * dy + dz * dz;
-        const minDist = rA.radius + rB.radius;
-
-        if (distSq < minDist * minDist && distSq > 0.0001) {
-          const dist = Math.sqrt(distSq);
-          const nx = dx / dist;
-          const ny = dy / dist;
-          const nz = dz / dist;
-
-          // Positional separation
-          const overlap = (minDist - dist) * 0.5;
-          rA.x -= nx * overlap;
-          rA.y -= ny * overlap;
-          rA.z -= nz * overlap;
-          rB.x += nx * overlap;
-          rB.y += ny * overlap;
-          rB.z += nz * overlap;
-
-          // Relative velocity along normal
-          const kx = rA.vx - rB.vx;
-          const ky = rA.vy - rB.vy;
-          const kz = rA.vz - rB.vz;
-          const relVel = kx * nx + ky * ny + kz * nz;
-
-          if (relVel > 0) {
-            // Calculate restitution impulse
-            const e = (rA.ballDef.restitution + rB.ballDef.restitution) * 0.5;
-            const mA = rA.ballDef.mass;
-            const mB = rB.ballDef.mass;
-            const jImpulse = (-(1 + e) * relVel) / (1 / mA + 1 / mB);
-
-            rA.vx += (jImpulse / mA) * nx;
-            rA.vy += (jImpulse / mA) * ny;
-            rA.vz += (jImpulse / mA) * nz;
-
-            rB.vx -= (jImpulse / mB) * nx;
-            rB.vy -= (jImpulse / mB) * ny;
-            rB.vz -= (jImpulse / mB) * nz;
-
-            // Squash deform on both balls
-            const impactIntensity = Math.min(1.5, Math.abs(relVel) / 8.0);
-            rA.squashY = Math.max(0.65, 1.0 - impactIntensity * 0.25);
-            rB.squashY = Math.max(0.65, 1.0 - impactIntensity * 0.25);
-
-            if (impactIntensity > 0.15 && onCollision) {
-              onCollision(impactIntensity, 'glass');
-            }
-          }
-        }
+    // 3. Ball-to-Ball Elastic Collisions
+    for (let i = 0; i < racers.length; i++) {
+      for (let j = i + 1; j < racers.length; j++) {
+        this.resolveBallBallCollision(racers[i], racers[j], particles);
       }
     }
 
-    // 4. Update relative rankings based on forward Z progress
-    const activeComp = racers.slice().sort((a, b) => {
+    // 4. Update Particles
+    for (let p = particles.length - 1; p >= 0; p--) {
+      const part = particles[p];
+      part.x += part.vx * clampedDt;
+      part.y += part.vy * clampedDt;
+      part.vy += 0.15 * clampedDt; // slight particle gravity
+      part.life += clampedDt;
+      part.alpha = Math.max(0, 1 - part.life / part.maxLife);
+      if (part.life >= part.maxLife) {
+        particles.splice(p, 1);
+      }
+    }
+
+    // 5. Update Ranks for Leaderboard
+    const sorted = racers.slice().sort((a, b) => {
       if (a.isFinished && b.isFinished) return (a.finishRank || 99) - (b.finishRank || 99);
       if (a.isFinished) return -1;
       if (b.isFinished) return 1;
-      if (a.isEliminated && !b.isEliminated) return 1;
-      if (!a.isEliminated && b.isEliminated) return -1;
-      return b.z - a.z;
+      return b.y - a.y;
     });
 
-    activeComp.forEach((racer, index) => {
-      if (!racer.isFinished) {
-        racer.rank = index + 1;
-      }
+    sorted.forEach((r, idx) => {
+      r.rank = idx + 1;
     });
   }
 
-  private findSegmentForZ(track: Track, z: number): TrackSegment | null {
-    for (const seg of track.segments) {
-      if (z >= seg.startZ && z <= seg.endZ + 2) {
-        return seg;
-      }
-    }
-    return track.segments[track.segments.length - 1] || null;
-  }
+  private resolveBallBallCollision(r1: RacerState, r2: RacerState, particles: Particle[]) {
+    const dx = r2.x - r1.x;
+    const dy = r2.y - r1.y;
+    const dist = Math.hypot(dx, dy);
+    const minDist = r1.radius + r2.radius;
 
-  private resolveTrackSurfaceCollision(
-    racer: RacerState,
-    seg: TrackSegment,
-    dt: number,
-    activeEvent: ActiveRaceEvent | null,
-    onCollision?: (intensity: number, mat: 'wood' | 'metal' | 'glass' | 'rubber') => void
-  ) {
-    const segLen = Math.max(1, seg.endZ - seg.startZ);
-    const u = Math.max(0, Math.min(1, (racer.z - seg.startZ) / segLen));
+    if (dist > 0 && dist < minDist) {
+      // Normal vector
+      const nx = dx / dist;
+      const ny = dy / dist;
 
-    // Interpolate center path X and floor Y
-    const centerX = seg.startX + (seg.endX - seg.startX) * u;
-    const floorY = seg.startY + (seg.endY - seg.startY) * u;
-    const slope = (seg.endY - seg.startY) / segLen; // negative means downhill
+      // Positional overlap resolution
+      const overlap = minDist - dist;
+      const totalMass = r1.mass + r2.mass;
+      r1.x -= nx * overlap * (r2.mass / totalMass);
+      r1.y -= ny * overlap * (r2.mass / totalMass);
+      r2.x += nx * overlap * (r1.mass / totalMass);
+      r2.y += ny * overlap * (r1.mass / totalMass);
 
-    const halfW = seg.width * 0.5;
-    const leftLimit = centerX - halfW + racer.radius;
-    const rightLimit = centerX + halfW - racer.radius;
+      // Relative velocity along normal
+      const kx = r1.vx - r2.vx;
+      const ky = r1.vy - r2.vy;
+      const p = 2 * (nx * kx + ny * ky) / totalMass;
 
-    // 1. Guardrail Side Wall Collisions
-    if (racer.x < leftLimit) {
-      racer.x = leftLimit;
-      if (racer.vx < 0) {
-        racer.vx = -racer.vx * seg.bounciness;
-        racer.vz += 1.5 * dt; // deflection forward
-        if (Math.abs(racer.vx) > 2.0 && onCollision) onCollision(0.4, 'wood');
-      }
-    } else if (racer.x > rightLimit) {
-      racer.x = rightLimit;
-      if (racer.vx > 0) {
-        racer.vx = -racer.vx * seg.bounciness;
-        racer.vz += 1.5 * dt;
-        if (Math.abs(racer.vx) > 2.0 && onCollision) onCollision(0.4, 'wood');
-      }
-    }
+      // Elastic response
+      const restitution = this.ballRestitution * (r1.bounciness + r2.bounciness) * 0.5;
+      r1.vx -= p * r2.mass * nx * restitution;
+      r1.vy -= p * r2.mass * ny * restitution;
+      r2.vx += p * r1.mass * nx * restitution;
+      r2.vy += p * r1.mass * ny * restitution;
 
-    // 2. Track Floor Collision & Slope Propulsion
-    const targetY = floorY + racer.radius;
-    if (racer.y <= targetY) {
-      racer.y = targetY;
+      // Impact squish
+      r1.squishX = 0.85;
+      r1.squishY = 1.18;
+      r2.squishX = 0.85;
+      r2.squishY = 1.18;
 
-      // Downhill slope gravitational acceleration
-      const slopeThrust = -slope * 28.0; // steeper downhill = faster
-      racer.vz += slopeThrust * dt;
-
-      // Friction
-      let friction = seg.friction;
-      if (seg.surfaceType === 'ICE' || (activeEvent && activeEvent.type === 'SLIPPERY_ICE')) {
-        friction = 0.005; // super slick!
-      } else if (seg.surfaceType === 'MUD') {
-        friction = 0.35;
-      }
-      racer.vx *= Math.pow(1.0 - friction, dt * 60);
-      racer.vz *= Math.pow(1.0 - friction * 0.5, dt * 60);
-
-      // Bounce restitution if landing from air
-      if (racer.vy < -2.0) {
-        const impact = Math.min(1.0, Math.abs(racer.vy) / 15.0);
-        racer.vy = -racer.vy * seg.bounciness * racer.ballDef.restitution;
-        racer.squashY = Math.max(0.6, 1.0 - impact * 0.4);
-        if (onCollision) onCollision(impact, 'wood');
-      } else {
-        racer.vy = 0;
+      const impactSpeed = Math.hypot(kx, ky);
+      if (impactSpeed > 4) {
+        sound.playBounce(impactSpeed);
+        // Tiny collision sparks
+        if (impactSpeed > 10 && Math.random() < 0.4) {
+          const midX = (r1.x + r2.x) / 2;
+          const midY = (r1.y + r2.y) / 2;
+          this.createExplosionSparks(particles, midX, midY, '#facc15', 4);
+        }
       }
     }
   }
 
-  private resolveObstacleCollisions(
-    racer: RacerState,
-    obstacles: ObstacleInstance[],
-    dt: number,
-    activeEvent: ActiveRaceEvent | null,
-    onCollision?: (intensity: number, mat: 'wood' | 'metal' | 'glass' | 'rubber') => void
-  ) {
-    for (const obs of obstacles) {
-      // Update obstacle dynamic phase
-      obs.phase += obs.rotSpeed * (activeEvent?.type === 'CHAOS_STORM' ? 2.0 : 1.0);
+  private resolveWallCollision(racer: RacerState, wall: { x1: number; y1: number; x2: number; y2: number; isBouncy?: boolean }, particles: Particle[]) {
+    const l2 = (wall.x2 - wall.x1) ** 2 + (wall.y2 - wall.y1) ** 2;
+    if (l2 === 0) return;
 
-      switch (obs.type) {
-        case 'HAMMER': {
-          // Giant swinging pendulum hammer
-          const swing = Math.sin(obs.phase) * (obs.swingAngle || 1.1);
-          const hammerX = obs.x + Math.sin(swing) * 6.0;
-          const hammerY = obs.y - Math.cos(swing) * 6.0 + 3.0;
-          const hammerZ = obs.z;
+    let t = ((racer.x - wall.x1) * (wall.x2 - wall.x1) + (racer.y - wall.y1) * (wall.y2 - wall.y1)) / l2;
+    t = Math.max(0, Math.min(1, t));
 
-          const dx = racer.x - hammerX;
-          const dy = racer.y - hammerY;
-          const dz = racer.z - hammerZ;
-          const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    const closestX = wall.x1 + t * (wall.x2 - wall.x1);
+    const closestY = wall.y1 + t * (wall.y2 - wall.y1);
 
-          if (dist < racer.radius + 2.0) {
-            // WHAM! Giant Hammer Impact!
-            const swingVel = Math.cos(obs.phase) * obs.rotSpeed * 120.0;
-            racer.vx += (dx / (dist || 1)) * 18.0 + swingVel * 0.3;
-            racer.vy += 8.0 + Math.random() * 4.0;
-            racer.vz += 10.0;
-            racer.squashY = 0.5;
-            sound.playHammerSmash();
-            if (onCollision) onCollision(1.0, 'metal');
+    const dx = racer.x - closestX;
+    const dy = racer.y - closestY;
+    const dist = Math.hypot(dx, dy);
+
+    if (dist < racer.radius && dist > 0) {
+      const nx = dx / dist;
+      const ny = dy / dist;
+
+      // Separate from wall
+      racer.x = closestX + nx * racer.radius;
+      racer.y = closestY + ny * racer.radius;
+
+      // Dot product velocity with normal
+      const dot = racer.vx * nx + racer.vy * ny;
+      if (dot < 0) {
+        const bounce = (wall.isBouncy ? 1.25 : this.wallRestitution) * racer.bounciness;
+        racer.vx -= (1 + bounce) * dot * nx;
+        racer.vy -= (1 + bounce) * dot * ny;
+
+        racer.squishX = 0.88;
+        racer.squishY = 1.15;
+
+        const impactSpeed = Math.abs(dot);
+        if (impactSpeed > 4) {
+          sound.playBounce(impactSpeed);
+          if (impactSpeed > 8) {
+            this.createExplosionSparks(particles, closestX, closestY, '#cbd5e1', 3);
           }
-          break;
-        }
-
-        case 'BOUNCY_PADS': {
-          // Pinball Bumper
-          const dx = racer.x - obs.x;
-          const dz = racer.z - obs.z;
-          const dist = Math.sqrt(dx * dx + dz * dz);
-          if (dist < racer.radius + obs.sizeX * 0.5 && Math.abs(racer.y - obs.y) < 2.0) {
-            const nx = dx / (dist || 1);
-            const nz = dz / (dist || 1);
-            racer.vx = nx * 22.0;
-            racer.vz = nz * 16.0 + 6.0;
-            racer.vy = 8.0;
-            racer.squashX = 0.7;
-            racer.squashZ = 0.7;
-            sound.playBouncyPad();
-            if (onCollision) onCollision(0.8, 'rubber');
-          }
-          break;
-        }
-
-        case 'SPEED_RAMP': {
-          // Speed Boost Arrow Pad
-          const dx = Math.abs(racer.x - obs.x);
-          const dz = Math.abs(racer.z - obs.z);
-          if (dx < obs.sizeX * 0.5 && dz < obs.sizeZ * 0.5 && Math.abs(racer.y - obs.y) < 1.5) {
-            racer.boostTimer = 1.2;
-            sound.playSpeedBoost();
-          }
-          break;
-        }
-
-        case 'FUNNEL': {
-          // Vortex suction pulling marbles toward drain center
-          const dx = obs.x - racer.x;
-          const dz = obs.z - racer.z;
-          const dist = Math.sqrt(dx * dx + dz * dz);
-          if (dist < obs.sizeX * 0.5) {
-            const pull = (1.0 - dist / (obs.sizeX * 0.5)) * 18.0;
-            // Tangential swirl + inward pull
-            racer.vx += (dx / (dist || 1)) * pull * dt - (dz / (dist || 1)) * 14.0 * dt;
-            racer.vz += (dz / (dist || 1)) * pull * dt + (dx / (dist || 1)) * 14.0 * dt;
-          }
-          break;
-        }
-
-        case 'GIANT_FAN': {
-          // Lateral wind stream
-          if (Math.abs(racer.z - obs.z) < 6.0 && racer.y >= obs.y - 2 && racer.y <= obs.y + 4) {
-            const blowDir = obs.x > 0 ? -1 : 1;
-            racer.vx += blowDir * 24.0 * dt;
-          }
-          break;
-        }
-
-        case 'PINS': {
-          // Pinball Pin Obstacle
-          const dx = racer.x - obs.x;
-          const dz = racer.z - obs.z;
-          const dist = Math.sqrt(dx * dx + dz * dz);
-          if (dist < racer.radius + obs.sizeX * 0.5 && Math.abs(racer.y - obs.y) < 2.0) {
-            const nx = dx / (dist || 1);
-            const nz = dz / (dist || 1);
-            racer.vx = nx * 14.0;
-            racer.vz = nz * 14.0;
-            if (onCollision) onCollision(0.6, 'wood');
-          }
-          break;
         }
       }
+    }
+  }
+
+  private resolveObstacleCollision(racer: RacerState, obs: Obstacle, particles: Particle[]) {
+    switch (obs.type) {
+      case 'PINBALL_BUMPER':
+      case 'BOUNCY_MUSHROOM': {
+        const radius = obs.radius || 30;
+        const dx = racer.x - obs.x;
+        const dy = racer.y - obs.y;
+        const dist = Math.hypot(dx, dy);
+        const minDist = racer.radius + radius;
+
+        if (dist < minDist && dist > 0) {
+          const nx = dx / dist;
+          const ny = dy / dist;
+          racer.x = obs.x + nx * minDist;
+          racer.y = obs.y + ny * minDist;
+
+          const power = (obs.power || 15) * (obs.type === 'BOUNCY_MUSHROOM' ? 1.2 : 1.0);
+          racer.vx = nx * power;
+          racer.vy = ny * power;
+
+          racer.squishX = 0.75;
+          racer.squishY = 1.35;
+
+          sound.playBumper();
+          this.createExplosionSparks(
+            particles,
+            obs.x + nx * radius,
+            obs.y + ny * radius,
+            obs.type === 'BOUNCY_MUSHROOM' ? '#a855f7' : '#ec4899',
+            10
+          );
+        }
+        break;
+      }
+
+      case 'SPINNING_HAMMER':
+      case 'ROTATING_BAR': {
+        const halfLen = (obs.length || 140) / 2;
+        const cos = Math.cos(obs.rotation);
+        const sin = Math.sin(obs.rotation);
+
+        const x1 = obs.x - cos * halfLen;
+        const y1 = obs.y - sin * halfLen;
+        const x2 = obs.x + cos * halfLen;
+        const y2 = obs.y + sin * halfLen;
+
+        const l2 = (x2 - x1) ** 2 + (y2 - y1) ** 2;
+        let t = ((racer.x - x1) * (x2 - x1) + (racer.y - y1) * (y2 - y1)) / l2;
+        t = Math.max(0, Math.min(1, t));
+
+        const cx = x1 + t * (x2 - x1);
+        const cy = y1 + t * (y2 - y1);
+
+        const dx = racer.x - cx;
+        const dy = racer.y - cy;
+        const dist = Math.hypot(dx, dy);
+        const barThickness = 12;
+
+        if (dist < racer.radius + barThickness && dist > 0) {
+          const nx = dx / dist;
+          const ny = dy / dist;
+
+          racer.x = cx + nx * (racer.radius + barThickness);
+          racer.y = cy + ny * (racer.radius + barThickness);
+
+          // Tangential blade speed
+          const distFromCenter = Math.hypot(cx - obs.x, cy - obs.y);
+          const tangentSpeed = distFromCenter * obs.rotationSpeed * 35;
+          const tx = -sin * (obs.rotationSpeed > 0 ? 1 : -1);
+          const ty = cos * (obs.rotationSpeed > 0 ? 1 : -1);
+
+          racer.vx = nx * 8 + tx * Math.abs(tangentSpeed) * 0.6;
+          racer.vy = ny * 8 + ty * Math.abs(tangentSpeed) * 0.6 + 2;
+
+          sound.playBumper();
+          this.createExplosionSparks(particles, cx, cy, '#f59e0b', 8);
+        }
+        break;
+      }
+
+      case 'BOOST_PAD': {
+        const w = obs.width || 40;
+        const h = obs.height || 60;
+        if (
+          racer.x > obs.x - w / 2 &&
+          racer.x < obs.x + w / 2 &&
+          racer.y > obs.y - h / 2 &&
+          racer.y < obs.y + h / 2
+        ) {
+          racer.vy = Math.max(racer.vy + 6, obs.power || 18);
+          racer.boostTimer = 30;
+          sound.playBoost();
+          if (Math.random() < 0.2) {
+            this.createExplosionSparks(particles, racer.x, racer.y, '#06b6d4', 6);
+          }
+        }
+        break;
+      }
+
+      case 'LASER_GATE': {
+        if (obs.laserActive) {
+          const w = obs.width || 200;
+          const h = obs.height || 16;
+          if (
+            racer.x > obs.x - w / 2 &&
+            racer.x < obs.x + w / 2 &&
+            racer.y > obs.y - h / 2 &&
+            racer.y < obs.y + h / 2
+          ) {
+            racer.vy = -Math.abs(racer.vy) * 0.8 - 4;
+            racer.vx += (Math.random() * 8 - 4);
+            sound.playLaser();
+            this.createExplosionSparks(particles, racer.x, racer.y, '#ef4444', 10);
+          }
+        }
+        break;
+      }
+
+      case 'VORTEX_FUNNEL': {
+        const radius = obs.radius || 100;
+        const dx = racer.x - obs.x;
+        const dy = racer.y - obs.y;
+        const dist = Math.hypot(dx, dy);
+
+        if (dist < radius) {
+          // Tangential swirl & slight center pull
+          const angle = Math.atan2(dy, dx);
+          const pull = (1 - dist / radius) * 0.7;
+          racer.vx += -Math.sin(angle) * 1.6 - Math.cos(angle) * pull;
+          racer.vy += Math.cos(angle) * 1.6 - Math.sin(angle) * pull + 0.2;
+        }
+        break;
+      }
+
+      case 'ICE_PATCH': {
+        const w = obs.width || 200;
+        const h = obs.height || 100;
+        if (
+          racer.x > obs.x - w / 2 &&
+          racer.x < obs.x + w / 2 &&
+          racer.y > obs.y - h / 2 &&
+          racer.y < obs.y + h / 2
+        ) {
+          racer.vx *= 1.01; // almost frictionless glide
+          racer.vy *= 1.01;
+        }
+        break;
+      }
+
+      case 'MUD_PATCH': {
+        const w = obs.width || 200;
+        const h = obs.height || 100;
+        if (
+          racer.x > obs.x - w / 2 &&
+          racer.x < obs.x + w / 2 &&
+          racer.y > obs.y - h / 2 &&
+          racer.y < obs.y + h / 2
+        ) {
+          racer.vx *= 0.95;
+          racer.vy *= 0.96;
+        }
+        break;
+      }
+    }
+  }
+
+  private createExplosionSparks(particles: Particle[], x: number, y: number, color: string, count: number) {
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 2 + Math.random() * 7;
+      particles.push({
+        x,
+        y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        color,
+        size: 3 + Math.random() * 4,
+        alpha: 1,
+        life: 0,
+        maxLife: 15 + Math.random() * 15,
+        shape: 'SPARK',
+      });
+    }
+  }
+
+  private createConfetti(particles: Particle[], x: number, y: number, count: number) {
+    const colors = ['#f43f5e', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#facc15'];
+    for (let i = 0; i < count; i++) {
+      const angle = (Math.random() - 0.5) * Math.PI - Math.PI / 2;
+      const speed = 4 + Math.random() * 10;
+      particles.push({
+        x,
+        y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        size: 6 + Math.random() * 6,
+        alpha: 1,
+        life: 0,
+        maxLife: 60 + Math.random() * 40,
+        shape: 'CONFETTI',
+      });
     }
   }
 }
