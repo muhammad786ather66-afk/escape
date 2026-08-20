@@ -1,6 +1,6 @@
 {
-  "name": "OPERATION: SHADOW STRIKE",
-  "description": "Cinematic 3D auto-run combat action game featuring Agent Kai Mercer with procedural infinite missions, aircraft dogfights, dynamic radio intel, epic boss encounters, tactical upgrades, and mobile controls.",
+  "name": "Countryballs Marble Racing",
+  "description": "Addictive, endless 3D Countryball marble racing physics simulation featuring automatic procedural obstacle courses, funny collisions, environmental themes, ASMR audio, dynamic camera, and local leaderboards.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

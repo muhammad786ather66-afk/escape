@@ -1,215 +1,204 @@
-export type GameMode = 'GROUND' | 'AIRCRAFT';
+export type TrackTheme =
+  | 'GRASSLAND'
+  | 'DESERT'
+  | 'ICE_WORLD'
+  | 'VOLCANO'
+  | 'OCEAN'
+  | 'SKY'
+  | 'SPACE'
+  | 'JUNGLE'
+  | 'FACTORY'
+  | 'CANDY_WORLD';
 
-export type GameState = 
-  | 'MENU'
-  | 'BRIEFING'
-  | 'PLAYING'
-  | 'PAUSED'
-  | 'BOSS_INTRO'
-  | 'VICTORY'
-  | 'DEFEAT'
-  | 'ARSENAL'
-  | 'UPGRADES'
-  | 'OPERATIONS'
-  | 'ACHIEVEMENTS'
-  | 'SETTINGS';
+export type ObstacleType =
+  | 'HAMMER'
+  | 'SPINNING_WHEEL'
+  | 'FUNNEL'
+  | 'TRAP_DOORS'
+  | 'BOUNCY_PADS'
+  | 'MOVING_BRIDGE'
+  | 'FIRE_ZONE'
+  | 'ICE_ZONE'
+  | 'WATER_CURRENT'
+  | 'GIANT_FAN'
+  | 'ROTATING_ARM'
+  | 'FALLING_ROCKS'
+  | 'CANNON'
+  | 'COLOR_GATES'
+  | 'SEESAW'
+  | 'PINS'
+  | 'SPEED_RAMP'
+  | 'SPIRAL'
+  | 'SPLIT_PATH'
+  | 'NARROW_BRIDGE';
 
-export type WeatherType = 'CLEAR' | 'SUNSET' | 'NIGHT' | 'RAIN' | 'SNOW' | 'DUST_STORM' | 'OCEAN_STORM';
+export type CameraMode = 'LEADER' | 'PACK' | 'ACTION' | 'FINISH_LINE' | 'FREE_ORBIT' | 'TOP_DOWN';
 
-export type EnvironmentTheme = 
-  | 'NEON_CITY'
-  | 'WAR_ZONE'
-  | 'DESERT_HIGHWAY'
-  | 'SNOW_BASE'
-  | 'SECRET_LAB'
-  | 'COASTAL_HARBOR'
-  | 'OCEAN_CARRIER'
-  | 'SEA_STRIKE'
-  | 'CYBER_BRIDGE'
-  | 'MOUNTAIN_PASS'
-  | 'AIRCRAFT_CARRIER'
-  | 'AERIAL_CLOUD';
+export type RaceEventType =
+  | 'SUPER_SPEED'
+  | 'GIANT_HAMMER'
+  | 'SLIPPERY_ICE'
+  | 'EARTHQUAKE'
+  | 'LOW_GRAVITY'
+  | 'FINAL_SPRINT'
+  | 'CHAOS_STORM';
 
-export type WeaponId = 
-  | 'ASSAULT_RIFLE'
-  | 'TACTICAL_SMG'
-  | 'HEAVY_SHOTGUN'
-  | 'SNIPER_RIFLE'
-  | 'PLASMA_CANNON'
-  | 'ROCKET_LAUNCHER'
-  | 'MINIGUN';
-
-export interface WeaponDef {
-  id: WeaponId;
+export interface CountryballDef {
+  id: string;
   name: string;
-  category: string;
+  code: string;
+  flagCode: string;
+  primaryColor: string;
+  secondaryColor: string;
+  accentColor?: string;
+  patternType: 'stripes_h' | 'stripes_v' | 'cross' | 'circle' | 'canton' | 'triangle' | 'sun' | 'stars' | 'diagonal';
+  eyeStyle: 'happy' | 'determined' | 'derp' | 'cool' | 'shocked' | 'intense';
+  personality: string;
   description: string;
-  damage: number;
-  fireRate: number; // shots per sec
-  range: number;
-  magSize: number;
-  reloadTime: number; // seconds
-  recoil: number;
-  bulletSpeed: number;
-  bulletColor: string;
-  bulletRadius: number;
-  isExplosive?: boolean;
-  spread?: number;
-  bulletsPerShot?: number;
-  cost: number;
-  unlockedByDefault: boolean;
-  icon: string;
+  // Physics attributes
+  mass: number;          // 0.8 to 1.3
+  restitution: number;   // 0.6 to 0.9 (bounciness)
+  topSpeed: number;      // 1.0 to 1.3
+  grip: number;          // 0.8 to 1.2
+  specialTrait: string;
 }
 
-export type SpecialAbilityId = 'ORBITAL_STRIKE' | 'BULLET_TIME' | 'DRONE_SWARM' | 'EMP_BLAST' | 'OVERCHARGE_SHIELD';
+export interface RacerState {
+  id: string;
+  ballDef: CountryballDef;
+  x: number;
+  y: number;
+  z: number;
+  vx: number;
+  vy: number;
+  vz: number;
+  rotX: number;
+  rotY: number;
+  rotZ: number;
+  vRotX: number;
+  vRotY: number;
+  vRotZ: number;
+  radius: number;
+  isEliminated: boolean;
+  eliminationReason?: string;
+  isFinished: boolean;
+  finishTime?: number;
+  finishRank?: number;
+  rank: number;
+  distanceProgress: number; // progress along track 0..1
+  stuckTimer: number;
+  lastProgressZ: number;
+  squashX: number;
+  squashY: number;
+  squashZ: number;
+  trailPoints: { x: number; y: number; z: number; alpha: number }[];
+  boostTimer: number;
+  iceTimer: number;
+  fireTimer: number;
+  colorFlash?: string;
+}
 
-export interface SpecialAbilityDef {
-  id: SpecialAbilityId;
+export interface ObstacleInstance {
+  id: string;
+  type: ObstacleType;
+  x: number;
+  y: number;
+  z: number;
+  sizeX: number;
+  sizeY: number;
+  sizeZ: number;
+  rotation: number;
+  rotSpeed: number;
+  phase: number;
+  swingAngle?: number;
+  isOpen?: boolean;
+  customData?: Record<string, number | boolean | string>;
+}
+
+export interface TrackSegment {
+  id: string;
+  type: 'STRAIGHT' | 'CURVE_LEFT' | 'CURVE_RIGHT' | 'SLOPE_DOWN' | 'SLOPE_UP' | 'FUNNEL' | 'SPLIT' | 'MERGE' | 'SPIRAL' | 'JUMP_GAP' | 'SEESAW' | 'NARROW';
+  startX: number;
+  startY: number;
+  startZ: number;
+  endX: number;
+  endY: number;
+  endZ: number;
+  width: number;
+  wallHeight: number;
+  friction: number;
+  bounciness: number;
+  obstacles: ObstacleInstance[];
+  surfaceType: 'NORMAL' | 'ICE' | 'MUD' | 'BOOST' | 'WATER' | 'WOOD' | 'NEON';
+  isShortcut?: boolean;
+}
+
+export interface Track {
+  id: string;
+  level: number;
   name: string;
-  description: string;
-  duration: number;
-  cooldown: number;
-  icon: string;
+  theme: TrackTheme;
+  difficulty: number;
+  totalLength: number;
+  segments: TrackSegment[];
+  spawnPositions: { x: number; y: number; z: number }[];
+  finishZ: number;
 }
 
-export type EnemyType = 
-  | 'SOLDIER'
-  | 'FAST_STRIKER'
-  | 'HEAVY_GUNNER'
-  | 'RIOT_SHIELD'
-  | 'SNIPER'
-  | 'ROCKET_SOLDIER'
-  | 'DRONE'
-  | 'WAR_MECH'
-  | 'PATROL_JEEP'
-  | 'ENEMY_JET'
-  | 'ATTACK_HELI'
-  | 'NAVAL_GUNBOAT';
-
-export type BossType = 
-  | 'GROUND_WARLORD'
-  | 'COLOSSUS_MECH'
-  | 'HAVOC_GUNSHIP'
-  | 'DREADNOUGHT_JET'
-  | 'NAVAL_DREADNOUGHT';
-
-export interface MissionObjective {
-  type: 'SURVIVE_TIME' | 'REACH_DISTANCE' | 'KILL_ENEMIES' | 'DESTROY_BOSS' | 'DEFEAT_DRONES' | 'DESTROY_CONVOY' | 'INFINITE_SURVIVE';
-  description: string;
-  target: number;
-  current: number;
-  completed: boolean;
-}
-
-export interface MissionConfig {
-  id: string;
-  missionNumber: number;
-  codeName: string;
-  classification: 'RESTRICTED' | 'SECRET' | 'TOP SECRET' | 'EYES ONLY';
-  location: string;
-  briefing: string;
-  theme: EnvironmentTheme;
-  weather: WeatherType;
-  gameMode: GameMode;
-  threatLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'EXTREME' | 'NIGHTFALL';
-  targetDistance: number;
-  objectives: MissionObjective[];
-  hasBoss: boolean;
-  bossType?: BossType;
-  bossName?: string;
-  rewardCredits: number;
-  rewardXP: number;
-  isInfinite?: boolean;
-}
-
-export interface RadioMessage {
-  id: string;
-  sender: 'HQ' | 'COMMANDER VEX' | 'AGENT MERCER' | 'INTEL' | 'OVERWATCH';
-  callsign: string;
-  text: string;
-  urgency: 'NORMAL' | 'WARNING' | 'ALERT' | 'VICTORY';
-  timestamp: number;
-  duration: number;
-}
-
-export interface UpgradeTree {
-  // Operative upgrades
-  maxHealthLevel: number;
-  shieldLevel: number;
-  critChanceLevel: number;
-  dodgeWindowLevel: number;
-  meleeDamageLevel: number;
-  creditBonusLevel: number;
-  
-  // Weapon upgrade levels (keyed by WeaponId)
-  weaponDamageLevels: Record<WeaponId, number>;
-  weaponMagLevels: Record<WeaponId, number>;
-  weaponReloadLevels: Record<WeaponId, number>;
-  
-  // Aircraft upgrades
-  jetArmorLevel: number;
-  jetSpeedLevel: number;
-  missileCapacityLevel: number;
-  flareCooldownLevel: number;
-}
-
-export interface Achievement {
-  id: string;
+export interface ActiveRaceEvent {
+  type: RaceEventType;
   title: string;
   description: string;
-  unlocked: boolean;
-  progress: number;
-  maxProgress: number;
-  rewardCredits: number;
-  icon: string;
+  duration: number;
+  remainingTime: number;
 }
 
-export interface SaveData {
-  agentName: string;
+export interface LeaderboardEntry {
+  countryId: string;
+  name: string;
+  flagCode: string;
+  primaryColor: string;
+  wins: number;
+  top3: number;
+  racesRun: number;
+  totalPoints: number;
+  bestTime?: number;
+  highestLevelWon?: number;
+}
+
+export interface GameSettings {
+  soundVolume: number;      // 0..1
+  musicVolume: number;      // 0..1
+  sfxEnabled: boolean;
+  musicEnabled: boolean;
+  simulationSpeed: number;  // 0.5, 1, 1.5, 2, 3
+  cameraMode: CameraMode;
+  showNames: boolean;
+  showTrails: boolean;
+  autoAdvanceDelay: number; // seconds to wait on podium before next race
+  particleDensity: 'LOW' | 'MED' | 'HIGH';
+  selectedCountryIds?: string[]; // null or array of enabled racer IDs
+}
+
+export interface RaceResult {
+  winner: CountryballDef;
   level: number;
-  xp: number;
-  credits: number;
-  highestMission: number;
-  missionsCompleted: number;
-  highestCombo: number;
-  highestScore: number;
-  totalKills: number;
-  totalBossesDefeated: number;
-  totalDistanceRun: number;
-  
-  equippedWeapon: WeaponId;
-  equippedSecondaryWeapon: WeaponId;
-  equippedAbility: SpecialAbilityId;
-  unlockedWeapons: WeaponId[];
-  
-  upgrades: UpgradeTree;
-  achievements: Achievement[];
-  
-  settings: {
-    graphicsQuality: 'LOW' | 'MEDIUM' | 'HIGH' | 'ULTRA';
-    soundVolume: number;
-    musicVolume: number;
-    voiceVolume: number;
-    invertPitch: boolean;
-    autoFire: boolean;
-    autoPilot: boolean;
-    hidePanels: boolean;
-    vibrationEnabled: boolean;
-  };
-}
-
-export interface CombatStats {
-  score: number;
-  combo: number;
-  comboMultiplier: number;
-  comboTimer: number;
-  kills: number;
-  headshots: number;
-  perfectDodges: number;
-  damageTaken: number;
-  damageDealt: number;
-  accuracyShots: number;
-  accuracyHits: number;
-  distanceTraveled: number;
-  timeElapsed: number;
+  trackName: string;
+  theme: TrackTheme;
+  raceDuration: number;
+  totalRacers: number;
+  eliminatedCount: number;
+  podium: {
+    rank: number;
+    racer: CountryballDef;
+    finishTime: number;
+    points: number;
+  }[];
+  allFinishers: {
+    rank: number;
+    racer: CountryballDef;
+    finishTime?: number;
+    points: number;
+    isEliminated: boolean;
+  }[];
 }

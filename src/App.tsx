@@ -1,247 +1,236 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  GameState, 
-  MissionConfig, 
-  CombatStats, 
-  SaveData 
-} from './types';
-import { SaveManager } from './game/saveManager';
-import { GameDirector } from './game/gameDirector';
-import { sound } from './game/audio';
-
-import { MainMenu } from './components/MainMenu';
+import React, { useState, useEffect, useCallback } from 'react';
 import { GameCanvas } from './components/GameCanvas';
-import { MissionBriefingModal } from './components/MissionBriefingModal';
-import { MissionDebriefModal } from './components/MissionDebriefModal';
-import { ArsenalModal } from './components/ArsenalModal';
-import { UpgradesModal } from './components/UpgradesModal';
-import { OperationsMapModal } from './components/OperationsMapModal';
-import { AchievementsModal } from './components/AchievementsModal';
+import { RaceHUD } from './components/RaceHUD';
+import { WinnerModal } from './components/WinnerModal';
+import { LeaderboardModal } from './components/LeaderboardModal';
+import { RosterModal } from './components/RosterModal';
 import { SettingsModal } from './components/SettingsModal';
+import { MainMenu } from './components/MainMenu';
+import { SaveManager } from './game/saveManager';
+import { sound } from './game/audioSynth';
+import {
+  GameSettings,
+  RaceResult,
+  RacerState,
+  ActiveRaceEvent,
+  CameraMode,
+  LeaderboardEntry,
+} from './types';
 
-export default function App() {
-  const [saveData, setSaveData] = useState<SaveData>(() => SaveManager.load());
-  const [gameState, setGameState] = useState<GameState>('MENU');
-  const [currentMission, setCurrentMission] = useState<MissionConfig>(() => 
-    GameDirector.generateMission(1)
-  );
+export function App() {
+  const [gameState, setGameState] = useState<'MENU' | 'RACING'>('MENU');
+  const [level, setLevel] = useState<number>(1);
+  const [settings, setSettings] = useState<GameSettings>(() => SaveManager.loadSettings());
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>(() => SaveManager.loadLeaderboard());
+  const [isPaused, setIsPaused] = useState<boolean>(false);
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [activeModal, setActiveModal] = useState<'LEADERBOARD' | 'ROSTER' | 'SETTINGS' | null>(null);
+  const [raceResult, setRaceResult] = useState<RaceResult | null>(null);
 
-  // Debrief states
-  const [debriefVictory, setDebriefVictory] = useState<boolean>(true);
-  const [debriefStats, setDebriefStats] = useState<CombatStats>({
-    score: 0,
-    combo: 0,
-    comboMultiplier: 1,
-    comboTimer: 0,
-    kills: 0,
-    headshots: 0,
-    perfectDodges: 0,
-    damageTaken: 0,
-    damageDealt: 0,
-    accuracyShots: 0,
-    accuracyHits: 0,
-    distanceTraveled: 0,
-    timeElapsed: 0,
+  // HUD telemetry state
+  const [hudData, setHudData] = useState<{
+    racers: RacerState[];
+    leader: RacerState | null;
+    eliminatedCount: number;
+    totalRacers: number;
+    countdown: number | null;
+    activeEvent: ActiveRaceEvent | null;
+    trackName: string;
+    trackTheme: string;
+  }>({
+    racers: [],
+    leader: null,
+    eliminatedCount: 0,
+    totalRacers: 16,
+    countdown: 3,
+    activeEvent: null,
+    trackName: 'Emerald Rolling Hills',
+    trackTheme: 'GRASSLAND',
   });
-  const [earnedCredits, setEarnedCredits] = useState<number>(0);
-  const [earnedXP, setEarnedXP] = useState<number>(0);
-  const [newLevel, setNewLevel] = useState<number>(1);
-  const [leveledUp, setLeveledUp] = useState<boolean>(false);
 
-  // Synchronize audio volumes on startup
+  // Sync sound settings to audio synth
   useEffect(() => {
-    sound.setVolumes(
-      saveData.settings.soundVolume,
-      saveData.settings.musicVolume,
-      saveData.settings.voiceVolume
-    );
-  }, [saveData.settings]);
-
-  // Handle Play Campaign from Main Menu
-  const handlePlayCampaign = () => {
-    const mission = GameDirector.generateMission(saveData.highestMission);
-    setCurrentMission(mission);
-    setGameState('BRIEFING');
-  };
-
-  // Handle Mission Selection from Operations Map
-  const handleSelectMission = (mission: MissionConfig) => {
-    setCurrentMission(mission);
-    setGameState('BRIEFING');
-  };
-
-  // Start Playing
-  const handleStartMission = () => {
-    setGameState('PLAYING');
-  };
-
-  // Mission Completed (Victory or Defeat)
-  const handleMissionFinished = (
-    victory: boolean, 
-    stats: CombatStats, 
-    creditsEarned: number, 
-    xpEarned: number
-  ) => {
-    setDebriefVictory(victory);
-    setDebriefStats(stats);
-    setEarnedCredits(creditsEarned);
-    setEarnedXP(xpEarned);
-
-    // Calculate progression & Level Ups
-    let currentXP = saveData.xp + xpEarned;
-    let currentLvl = saveData.level;
-    let didLevelUp = false;
-
-    while (currentXP >= SaveManager.getXPForNextLevel(currentLvl)) {
-      currentXP -= SaveManager.getXPForNextLevel(currentLvl);
-      currentLvl++;
-      didLevelUp = true;
+    sound.setVolumes(settings.soundVolume, settings.musicVolume, !settings.sfxEnabled);
+    if (gameState === 'RACING' && settings.musicEnabled) {
+      sound.startBGM();
+    } else {
+      sound.stopBGM();
     }
+  }, [settings, gameState]);
 
-    setNewLevel(currentLvl);
-    setLeveledUp(didLevelUp);
+  // Fullscreen helper
+  const handleToggleFullscreen = useCallback(() => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => {});
+      setIsFullscreen(true);
+    } else {
+      document.exitFullscreen().catch(() => {});
+      setIsFullscreen(false);
+    }
+  }, []);
 
-    // Update achievements progress
-    const updatedAchievements = saveData.achievements.map((ach) => {
-      let progress = ach.progress;
-      if (ach.id === 'FIRST_BLOOD' && stats.kills > 0) progress = 1;
-      if (ach.id === 'KILL_50') progress += stats.kills;
-      if (ach.id === 'KILL_200') progress += stats.kills;
-      if (ach.id === 'BOSS_SLAYER' && currentMission.hasBoss && victory) progress = 1;
-      if (ach.id === 'COMBO_MASTER' && stats.comboMultiplier >= 10) progress = 10;
-      if (ach.id === 'FLIGHT_ACE' && currentMission.gameMode === 'AIRCRAFT') progress += stats.kills;
-      if (ach.id === 'WEAPON_HOARDER') progress = saveData.unlockedWeapons.length;
+  const handleStartRace = () => {
+    setGameState('RACING');
+    setRaceResult(null);
+    setIsPaused(false);
+    if (settings.musicEnabled) sound.startBGM();
+  };
 
-      const isUnlocked = progress >= ach.maxProgress;
-      return { ...ach, progress: Math.min(ach.maxProgress, progress), unlocked: isUnlocked };
+  const handleRestartRace = () => {
+    setRaceResult(null);
+    setIsPaused(false);
+    // Force re-mount of canvas for current level
+    setLevel((prev) => prev);
+  };
+
+  const handleNextRace = () => {
+    setRaceResult(null);
+    setIsPaused(false);
+    setLevel((prev) => prev + 1);
+  };
+
+  const handleUpdateSettings = (newSettings: GameSettings) => {
+    setSettings(newSettings);
+    SaveManager.saveSettings(newSettings);
+  };
+
+  const handleToggleMute = () => {
+    handleUpdateSettings({
+      ...settings,
+      sfxEnabled: !settings.sfxEnabled,
+      musicEnabled: !settings.sfxEnabled,
     });
+  };
 
-    const newSave: SaveData = {
-      ...saveData,
-      credits: saveData.credits + creditsEarned,
-      xp: currentXP,
-      level: currentLvl,
-      highestMission: victory ? Math.max(saveData.highestMission, currentMission.missionNumber + 1) : saveData.highestMission,
-      missionsCompleted: victory ? saveData.missionsCompleted + 1 : saveData.missionsCompleted,
-      highestCombo: Math.max(saveData.highestCombo, stats.comboMultiplier),
-      highestScore: Math.max(saveData.highestScore, stats.score),
-      totalKills: saveData.totalKills + stats.kills,
-      totalBossesDefeated: victory && currentMission.hasBoss ? saveData.totalBossesDefeated + 1 : saveData.totalBossesDefeated,
-      totalDistanceRun: saveData.totalDistanceRun + stats.distanceTraveled,
-      achievements: updatedAchievements,
+  const handleChangeSpeed = (speed: number) => {
+    handleUpdateSettings({
+      ...settings,
+      simulationSpeed: speed,
+    });
+  };
+
+  const handleChangeCamera = (mode: CameraMode) => {
+    handleUpdateSettings({
+      ...settings,
+      cameraMode: mode,
+    });
+  };
+
+  // Global Keyboard Shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (activeModal !== null) {
+        if (e.key === 'Escape') setActiveModal(null);
+        return;
+      }
+
+      if (e.code === 'Space') {
+        e.preventDefault();
+        setIsPaused((prev) => !prev);
+      } else if (e.key === 'r' || e.key === 'R') {
+        handleRestartRace();
+      } else if (e.key === 'n' || e.key === 'N') {
+        handleNextRace();
+      } else if (e.key === 'm' || e.key === 'M') {
+        handleToggleMute();
+      } else if (e.key === 'f' || e.key === 'F') {
+        handleToggleFullscreen();
+      }
     };
 
-    SaveManager.save(newSave);
-    setSaveData(newSave);
-
-    setGameState(victory ? 'VICTORY' : 'DEFEAT');
-  };
-
-  // Next Mission after Victory
-  const handleNextMission = () => {
-    const nextMission = GameDirector.generateMission(currentMission.missionNumber + 1);
-    setCurrentMission(nextMission);
-    setGameState('BRIEFING');
-  };
-
-  // Retry Mission
-  const handleRetryMission = () => {
-    setGameState('BRIEFING');
-  };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeModal, handleToggleFullscreen, handleToggleMute]);
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden bg-zinc-950 text-zinc-100 flex flex-col font-mono">
-      {/* 3D Game Canvas Layer (Active when PLAYING) */}
-      {gameState === 'PLAYING' && (
-        <GameCanvas
-          mission={currentMission}
-          saveData={saveData}
-          onMissionFinished={handleMissionFinished}
-          onAbortToMenu={() => setGameState('MENU')}
-        />
-      )}
-
-      {/* Main Menu Overlay */}
+    <div className="w-screen h-screen overflow-hidden bg-slate-950 relative font-sans">
       {gameState === 'MENU' && (
         <MainMenu
-          saveData={saveData}
-          onPlay={handlePlayCampaign}
-          onOpenOperations={() => setGameState('OPERATIONS')}
-          onOpenArsenal={() => setGameState('ARSENAL')}
-          onOpenUpgrades={() => setGameState('UPGRADES')}
-          onOpenAchievements={() => setGameState('ACHIEVEMENTS')}
-          onOpenSettings={() => setGameState('SETTINGS')}
+          onStartRace={handleStartRace}
+          onOpenRoster={() => setActiveModal('ROSTER')}
+          onOpenLeaderboard={() => setActiveModal('LEADERBOARD')}
+          onOpenSettings={() => setActiveModal('SETTINGS')}
         />
       )}
 
-      {/* Mission Briefing Overlay */}
-      {gameState === 'BRIEFING' && (
-        <MissionBriefingModal
-          mission={currentMission}
-          onStartMission={handleStartMission}
+      {gameState === 'RACING' && (
+        <>
+          <GameCanvas
+            key={`canvas_level_${level}`}
+            level={level}
+            settings={settings}
+            isPaused={isPaused}
+            onRaceFinish={(result) => {
+              setRaceResult(result);
+              setLeaderboard(SaveManager.loadLeaderboard());
+            }}
+            onUpdateHUD={(data) => setHudData(data)}
+          />
+
+          <RaceHUD
+            level={level}
+            trackName={hudData.trackName}
+            trackTheme={hudData.trackTheme}
+            racers={hudData.racers}
+            leader={hudData.leader}
+            eliminatedCount={hudData.eliminatedCount}
+            totalRacers={hudData.totalRacers}
+            countdown={hudData.countdown}
+            activeEvent={hudData.activeEvent}
+            isPaused={isPaused}
+            settings={settings}
+            isFullscreen={isFullscreen}
+            onTogglePause={() => setIsPaused((prev) => !prev)}
+            onToggleMute={handleToggleMute}
+            onToggleFullscreen={handleToggleFullscreen}
+            onRestartRace={handleRestartRace}
+            onNextRace={handleNextRace}
+            onChangeSpeed={handleChangeSpeed}
+            onChangeCamera={handleChangeCamera}
+            onOpenLeaderboard={() => setActiveModal('LEADERBOARD')}
+            onOpenRoster={() => setActiveModal('ROSTER')}
+            onOpenSettings={() => setActiveModal('SETTINGS')}
+          />
+        </>
+      )}
+
+      {/* Winner Celebration Modal */}
+      {raceResult && (
+        <WinnerModal
+          result={raceResult}
+          autoAdvanceSeconds={settings.autoAdvanceDelay || 5}
+          onNextRace={handleNextRace}
         />
       )}
 
-      {/* Mission Debrief Evaluation (Victory or Defeat) */}
-      {(gameState === 'VICTORY' || gameState === 'DEFEAT') && (
-        <MissionDebriefModal
-          victory={debriefVictory}
-          mission={currentMission}
-          stats={debriefStats}
-          earnedCredits={earnedCredits}
-          earnedXP={earnedXP}
-          newLevel={newLevel}
-          leveledUp={leveledUp}
-          onNextMission={handleNextMission}
-          onRetry={handleRetryMission}
-          onOpenArsenal={() => setGameState('ARSENAL')}
-          onMainMenu={() => setGameState('MENU')}
+      {/* Leaderboard Modal */}
+      {activeModal === 'LEADERBOARD' && (
+        <LeaderboardModal
+          entries={leaderboard}
+          onUpdateEntries={(entries) => setLeaderboard(entries)}
+          onClose={() => setActiveModal(null)}
         />
       )}
 
-      {/* Arsenal Modal */}
-      {gameState === 'ARSENAL' && (
-        <ArsenalModal
-          saveData={saveData}
-          onUpdateSave={setSaveData}
-          onClose={() => setGameState('MENU')}
-        />
-      )}
-
-      {/* Upgrades Modal */}
-      {gameState === 'UPGRADES' && (
-        <UpgradesModal
-          saveData={saveData}
-          onUpdateSave={setSaveData}
-          onClose={() => setGameState('MENU')}
-        />
-      )}
-
-      {/* Operations Map Modal */}
-      {gameState === 'OPERATIONS' && (
-        <OperationsMapModal
-          saveData={saveData}
-          onSelectMission={handleSelectMission}
-          onClose={() => setGameState('MENU')}
-        />
-      )}
-
-      {/* Achievements Records Modal */}
-      {gameState === 'ACHIEVEMENTS' && (
-        <AchievementsModal
-          saveData={saveData}
-          onClose={() => setGameState('MENU')}
+      {/* Countryballs Roster Modal */}
+      {activeModal === 'ROSTER' && (
+        <RosterModal
+          selectedIds={settings.selectedCountryIds || []}
+          onUpdateSelectedIds={(ids) => handleUpdateSettings({ ...settings, selectedCountryIds: ids })}
+          onClose={() => setActiveModal(null)}
         />
       )}
 
       {/* Settings Modal */}
-      {gameState === 'SETTINGS' && (
+      {activeModal === 'SETTINGS' && (
         <SettingsModal
-          saveData={saveData}
-          onUpdateSave={setSaveData}
-          onClose={() => setGameState('MENU')}
+          settings={settings}
+          onUpdateSettings={handleUpdateSettings}
+          onClose={() => setActiveModal(null)}
         />
       )}
     </div>
   );
 }
+
+export default App;

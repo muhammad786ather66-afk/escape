@@ -1,255 +1,283 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { 
-  GameState, 
-  MissionConfig, 
-  CombatStats, 
-  RadioMessage, 
-  SaveData 
-} from '../types';
-import { ThreeGameEngine } from '../game/threeEngine';
+import { ThreeEngine } from '../game/threeEngine';
+import { PhysicsEngine } from '../game/physicsEngine';
+import { TrackGenerator } from '../game/trackGenerator';
+import { ALL_COUNTRYBALLS } from '../game/countryballsData';
+import { sound } from '../game/audioSynth';
 import { SaveManager } from '../game/saveManager';
-import { WEAPONS_DATABASE } from '../game/weapons';
-import { GameDirector } from '../game/gameDirector';
-import { TacticalHUD } from './TacticalHUD';
-import { PauseModal } from './PauseModal';
-import { sound } from '../game/audio';
+import { Track, RacerState, CountryballDef, ActiveRaceEvent, RaceResult, GameSettings } from '../types';
 
 interface GameCanvasProps {
-  mission: MissionConfig;
-  saveData: SaveData;
-  onMissionFinished: (victory: boolean, stats: CombatStats, earnedCredits: number, earnedXP: number) => void;
-  onAbortToMenu: () => void;
+  level: number;
+  settings: GameSettings;
+  isPaused: boolean;
+  onRaceFinish: (result: RaceResult) => void;
+  onUpdateHUD: (data: {
+    racers: RacerState[];
+    leader: RacerState | null;
+    eliminatedCount: number;
+    totalRacers: number;
+    countdown: number | null;
+    activeEvent: ActiveRaceEvent | null;
+    trackName: string;
+    trackTheme: string;
+  }) => void;
 }
 
 export const GameCanvas: React.FC<GameCanvasProps> = ({
-  mission,
-  saveData,
-  onMissionFinished,
-  onAbortToMenu,
+  level,
+  settings,
+  isPaused,
+  onRaceFinish,
+  onUpdateHUD,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const engineRef = useRef<ThreeGameEngine | null>(null);
+  const threeEngineRef = useRef<ThreeEngine | null>(null);
+  const physicsEngineRef = useRef<PhysicsEngine>(new PhysicsEngine());
 
-  // HUD Reactive States
-  const [health, setHealth] = useState<number>(100);
-  const [maxHealth, setMaxHealth] = useState<number>(100);
-  const [shield, setShield] = useState<number>(50);
-  const [maxShield, setMaxShield] = useState<number>(50);
-  const [ammo, setAmmo] = useState<number>(30);
-  const [maxAmmo, setMaxAmmo] = useState<number>(30);
-  const [isReloading, setIsReloading] = useState<boolean>(false);
-  const [abilityCharge, setAbilityCharge] = useState<number>(100);
-  const [isAbilityActive, setIsAbilityActive] = useState<boolean>(false);
-  const [abilityDurationLeft, setAbilityDurationLeft] = useState<number>(0);
-  const [autoPilot, setAutoPilotState] = useState<boolean>(saveData.settings.autoPilot ?? true);
-  const [currentSector, setCurrentSector] = useState<number>(1);
-  const [stats, setStats] = useState<CombatStats>({
-    score: 0,
-    combo: 0,
-    comboMultiplier: 1,
-    comboTimer: 0,
-    kills: 0,
-    headshots: 0,
-    perfectDodges: 0,
-    damageTaken: 0,
-    damageDealt: 0,
-    accuracyShots: 0,
-    accuracyHits: 0,
-    distanceTraveled: 0,
-    timeElapsed: 0,
-  });
-  const [radioMessage, setRadioMessage] = useState<RadioMessage | null>(null);
-  const [bossInfo, setBossInfo] = useState<{ name: string; health: number; maxHealth: number; isAlive: boolean } | null>(null);
-  const [isPaused, setIsPaused] = useState<boolean>(false);
+  // Race State
+  const trackRef = useRef<Track | null>(null);
+  const racersRef = useRef<RacerState[]>([]);
+  const countdownRef = useRef<number | null>(3);
+  const isRacingRef = useRef<boolean>(false);
+  const activeEventRef = useRef<ActiveRaceEvent | null>(null);
+  const raceStartTimeRef = useRef<number>(0);
+  const isFinishedRef = useRef<boolean>(false);
 
-  // Radio Trigger Handler with cooldown
-  const handleRadioTrigger = useCallback((type: any) => {
-    const msg = GameDirector.getRadioDialogue(type);
-    setRadioMessage(msg);
-    sound.speakRadioVoice(msg.text);
-    setTimeout(() => {
-      setRadioMessage((curr) => (curr?.id === msg.id ? null : curr));
-    }, msg.duration * 1000);
+  // Initialize and spawn new race track
+  const setupNewRace = useCallback((currentLevel: number, currentSettings: GameSettings) => {
+    if (!threeEngineRef.current) return;
+
+    // Filter enabled countryballs
+    let enabledRacers = ALL_COUNTRYBALLS;
+    if (currentSettings.selectedCountryIds && currentSettings.selectedCountryIds.length >= 4) {
+      enabledRacers = ALL_COUNTRYBALLS.filter((c) => currentSettings.selectedCountryIds!.includes(c.id));
+    }
+    // Pick 12 to 16 racers
+    const selectedRacers = enabledRacers.slice().sort(() => Math.random() - 0.5).slice(0, 16);
+
+    const track = TrackGenerator.generateTrack(currentLevel, selectedRacers.length);
+    trackRef.current = track;
+
+    threeEngineRef.current.setEnvironmentTheme(track.theme);
+    threeEngineRef.current.buildTrack(track);
+
+    // Instantiate racers
+    const newRacers: RacerState[] = selectedRacers.map((ballDef, idx) => {
+      const spawn = track.spawnPositions[idx] || { x: 0, y: 14, z: 4 };
+      return {
+        id: ballDef.id,
+        ballDef,
+        x: spawn.x,
+        y: spawn.y,
+        z: spawn.z,
+        vx: 0,
+        vy: 0,
+        vz: 0,
+        rotX: 0,
+        rotY: 0,
+        rotZ: 0,
+        vRotX: 0,
+        vRotY: 0,
+        vRotZ: 0,
+        radius: 1.2,
+        isEliminated: false,
+        isFinished: false,
+        rank: idx + 1,
+        distanceProgress: 0,
+        stuckTimer: 0,
+        lastProgressZ: spawn.z,
+        squashX: 1,
+        squashY: 1,
+        squashZ: 1,
+        trailPoints: [],
+        boostTimer: 0,
+        iceTimer: 0,
+        fireTimer: 0,
+      };
+    });
+
+    racersRef.current = newRacers;
+    threeEngineRef.current.setupRacerMeshes(newRacers);
+
+    // Reset race controls
+    countdownRef.current = 3;
+    isRacingRef.current = false;
+    isFinishedRef.current = false;
+    activeEventRef.current = null;
+    raceStartTimeRef.current = Date.now();
+
+    // Start 3.. 2.. 1.. GO countdown
+    sound.playCountdownBeep(false);
+
+    let count = 3;
+    const interval = setInterval(() => {
+      count -= 1;
+      if (count > 0) {
+        countdownRef.current = count;
+        sound.playCountdownBeep(false);
+      } else if (count === 0) {
+        countdownRef.current = 0; // "GO!"
+        sound.playCountdownBeep(true);
+        isRacingRef.current = true;
+        // Release initial forward roll momentum
+        racersRef.current.forEach((r) => {
+          r.vz = 8.0 + Math.random() * 4.0;
+        });
+      } else {
+        countdownRef.current = null;
+        clearInterval(interval);
+      }
+    }, 900);
   }, []);
 
   // Initialize Three.js Engine
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const currentWeaponDef = WEAPONS_DATABASE[saveData.equippedWeapon];
-    const suitStats = SaveManager.getPlayerSuitStats(saveData.upgrades);
+    const threeEngine = new ThreeEngine(containerRef.current);
+    threeEngineRef.current = threeEngine;
+    threeEngine.cameraMode = settings.cameraMode;
 
-    const engine = new ThreeGameEngine(
-      containerRef.current,
-      {
-        onScoreUpdate: (newStats) => {
-          setStats(newStats);
-          if (engineRef.current) {
-            setCurrentSector(engineRef.current.currentSector);
+    setupNewRace(level, settings);
+
+    // Animation loop
+    let animId: number;
+    let lastTime = performance.now();
+
+    const loop = (time: number) => {
+      animId = requestAnimationFrame(loop);
+
+      const rawDt = Math.min(0.05, (time - lastTime) / 1000);
+      lastTime = time;
+
+      if (!isPaused && trackRef.current && threeEngineRef.current) {
+        const dt = rawDt * settings.simulationSpeed;
+
+        if (isRacingRef.current && !isFinishedRef.current) {
+          // Physics step
+          physicsEngineRef.current.update(
+            racersRef.current,
+            trackRef.current,
+            dt,
+            activeEventRef.current,
+            (intensity, mat) => {
+              if (settings.sfxEnabled) sound.playCollision(intensity, mat);
+            },
+            (racer, reason) => {
+              // Elimination
+            },
+            (racer, rank) => {
+              // Finisher!
+              if (rank === 1 && !isFinishedRef.current) {
+                isFinishedRef.current = true;
+                sound.playVictoryFanfare();
+
+                // Compute podium & results
+                const sorted = racersRef.current.slice().sort((a, b) => {
+                  if (a.isFinished && b.isFinished) return (a.finishRank || 99) - (b.finishRank || 99);
+                  if (a.isFinished) return -1;
+                  if (b.isFinished) return 1;
+                  return b.z - a.z;
+                });
+
+                const raceDuration = (Date.now() - raceStartTimeRef.current) / 1000;
+                const result: RaceResult = {
+                  winner: racer.ballDef,
+                  level,
+                  trackName: trackRef.current?.name || `Track ${level}`,
+                  theme: trackRef.current?.theme || 'GRASSLAND',
+                  raceDuration,
+                  totalRacers: racersRef.current.length,
+                  eliminatedCount: racersRef.current.filter((r) => r.isEliminated).length,
+                  podium: sorted.slice(0, 3).map((r, idx) => ({
+                    rank: idx + 1,
+                    racer: r.ballDef,
+                    finishTime: raceDuration + idx * 0.4,
+                    points: idx === 0 ? 100 : idx === 1 ? 70 : 50,
+                  })),
+                  allFinishers: sorted.map((r, idx) => ({
+                    rank: idx + 1,
+                    racer: r.ballDef,
+                    finishTime: r.isFinished ? raceDuration + idx * 0.3 : undefined,
+                    points: Math.max(10, 100 - idx * 8),
+                    isEliminated: r.isEliminated,
+                  })),
+                };
+
+                SaveManager.recordRaceResult(result);
+                onRaceFinish(result);
+              }
+            }
+          );
+
+          // Random Special Events Trigger (12% chance every 10 seconds of race)
+          if (Math.random() < 0.003 && !activeEventRef.current) {
+            const events: ActiveRaceEvent[] = [
+              { type: 'SUPER_SPEED', title: '🔥 SUPER SPEED BOOST!', description: 'All Countryballs gain +45% top speed!', duration: 5, remainingTime: 5 },
+              { type: 'SLIPPERY_ICE', title: '❄️ SLIPPERY ICE STORM!', description: 'Zero friction on all surfaces!', duration: 6, remainingTime: 6 },
+              { type: 'LOW_GRAVITY', title: '🚀 LOW GRAVITY ZONE!', description: 'Moon physics activated! Huge jumps!', duration: 6, remainingTime: 6 },
+              { type: 'FINAL_SPRINT', title: '⚡ FINAL SPRINT HYPERDRIVE!', description: 'Intense rush toward the finish line!', duration: 7, remainingTime: 7 },
+            ];
+            activeEventRef.current = events[Math.floor(Math.random() * events.length)];
           }
-        },
-        onHealthUpdate: (hp, maxHp, sh, maxSh) => {
-          setHealth(hp);
-          setMaxHealth(maxHp);
-          setShield(sh);
-          setMaxShield(maxSh);
-        },
-        onAmmoUpdate: (currAmmo, maxA, reloading) => {
-          setAmmo(currAmmo);
-          setMaxAmmo(maxA);
-          setIsReloading(reloading);
-        },
-        onAbilityUpdate: (charge, active, dur) => {
-          setAbilityCharge(charge);
-          setIsAbilityActive(active);
-          setAbilityDurationLeft(dur);
-        },
-        onBossHealthUpdate: (name, bHp, bMaxHp, isAlive) => {
-          setBossInfo({ name, health: bHp, maxHealth: bMaxHp, isAlive });
-        },
-        onRadioTrigger: handleRadioTrigger,
-        onMissionComplete: (victory, finalStats) => {
-          const earnedCredits = victory ? mission.rewardCredits : Math.floor(mission.rewardCredits * 0.25);
-          const earnedXP = victory ? mission.rewardXP : Math.floor(mission.rewardXP * 0.25);
-          onMissionFinished(victory, finalStats, earnedCredits, earnedXP);
-        },
-      },
-      saveData.settings.graphicsQuality
-    );
 
-    engine.setAutoPilot(autoPilot);
+          if (activeEventRef.current) {
+            activeEventRef.current.remainingTime -= dt;
+            if (activeEventRef.current.remainingTime <= 0) {
+              activeEventRef.current = null;
+            }
+          }
+        }
 
-    engine.configureMission(
-      mission.theme,
-      mission.weather,
-      mission.gameMode,
-      mission.targetDistance,
-      currentWeaponDef,
-      saveData.equippedAbility,
-      suitStats,
-      mission.isInfinite
-    );
+        // Update 3D visual representations
+        threeEngineRef.current.updateRacers(racersRef.current);
 
-    engine.start();
-    engineRef.current = engine;
+        const alive = racersRef.current.filter((r) => !r.isEliminated);
+        const leader = alive.length > 0 ? alive.reduce((prev, curr) => (curr.z > prev.z ? curr : prev), alive[0]) : null;
 
-    // Trigger Initial Radio Message
-    handleRadioTrigger('MISSION_START');
+        threeEngineRef.current.updateCamera(
+          racersRef.current,
+          isFinishedRef.current,
+          leader ? leader.ballDef : undefined
+        );
+
+        // Update HUD
+        onUpdateHUD({
+          racers: racersRef.current,
+          leader,
+          eliminatedCount: racersRef.current.filter((r) => r.isEliminated).length,
+          totalRacers: racersRef.current.length,
+          countdown: countdownRef.current,
+          activeEvent: activeEventRef.current,
+          trackName: trackRef.current.name,
+          trackTheme: trackRef.current.theme,
+        });
+      }
+
+      threeEngineRef.current?.render();
+    };
+
+    animId = requestAnimationFrame(loop);
 
     return () => {
-      engine.destroy();
-      engineRef.current = null;
+      cancelAnimationFrame(animId);
+      threeEngine.destroy();
     };
-  }, [mission, saveData, handleRadioTrigger, onMissionFinished]);
+  }, [level, setupNewRace]);
 
-  // Toggle Auto-Pilot
-  const handleToggleAutoPilot = () => {
-    sound.playRadioSquelch();
-    const nextVal = !autoPilot;
-    setAutoPilotState(nextVal);
-    if (engineRef.current) {
-      engineRef.current.setAutoPilot(nextVal);
+  // Handle settings update
+  useEffect(() => {
+    if (threeEngineRef.current) {
+      threeEngineRef.current.cameraMode = settings.cameraMode;
     }
-  };
-
-  // Player input wrappers
-  const handleMoveLeft = () => engineRef.current?.moveLane(-1);
-  const handleMoveRight = () => engineRef.current?.moveLane(1);
-  const handleJump = () => engineRef.current?.jump();
-  const handleSlide = () => engineRef.current?.slide();
-  const handleMelee = () => engineRef.current?.meleeAttack();
-  const handleReload = () => engineRef.current?.reload();
-  const handleStartFiring = () => engineRef.current?.startFiring();
-  const handleStopFiring = () => engineRef.current?.stopFiring();
-  const handleActivateAbility = () => engineRef.current?.activateSpecialAbility();
-  const handleDeployFlares = () => engineRef.current?.deployFlares();
-  const handleAltitudeUp = () => engineRef.current?.adjustJetAltitude(1.5);
-  const handleAltitudeDown = () => engineRef.current?.adjustJetAltitude(-1.5);
-
-  const handlePause = () => {
-    setIsPaused(true);
-    engineRef.current?.pause();
-  };
-
-  const handleResume = () => {
-    setIsPaused(false);
-    engineRef.current?.resumeGame();
-  };
-
-  const handleRestart = () => {
-    setIsPaused(false);
-    if (engineRef.current) {
-      const currentWeaponDef = WEAPONS_DATABASE[saveData.equippedWeapon];
-      const suitStats = SaveManager.getPlayerSuitStats(saveData.upgrades);
-      engineRef.current.configureMission(
-        mission.theme,
-        mission.weather,
-        mission.gameMode,
-        mission.targetDistance,
-        currentWeaponDef,
-        saveData.equippedAbility,
-        suitStats,
-        mission.isInfinite
-      );
-      engineRef.current.resumeGame();
-    }
-  };
+  }, [settings.cameraMode]);
 
   return (
-    <div id="game-canvas-container" className="relative w-full h-full overflow-hidden bg-black select-none">
-      {/* Three.js Container */}
-      <div ref={containerRef} className="w-full h-full cursor-crosshair touch-none" />
-
-      {/* In-Game Tactical HUD */}
-      {!isPaused && (
-        <TacticalHUD
-          gameMode={mission.gameMode}
-          health={health}
-          maxHealth={maxHealth}
-          shield={shield}
-          maxShield={maxShield}
-          ammo={ammo}
-          maxAmmo={maxAmmo}
-          isReloading={isReloading}
-          weapon={WEAPONS_DATABASE[saveData.equippedWeapon]}
-          abilityCharge={abilityCharge}
-          isAbilityActive={isAbilityActive}
-          abilityDurationLeft={abilityDurationLeft}
-          abilityId={saveData.equippedAbility}
-          stats={stats}
-          targetDistance={mission.targetDistance}
-          isInfinite={mission.isInfinite}
-          currentSector={currentSector}
-          autoPilot={autoPilot}
-          hidePanelsDefault={saveData.settings.hidePanels}
-          radioMessage={radioMessage}
-          bossInfo={bossInfo}
-          onToggleAutoPilot={handleToggleAutoPilot}
-          onMoveLeft={handleMoveLeft}
-          onMoveRight={handleMoveRight}
-          onJump={handleJump}
-          onSlide={handleSlide}
-          onMelee={handleMelee}
-          onReload={handleReload}
-          onStartFiring={handleStartFiring}
-          onStopFiring={handleStopFiring}
-          onActivateAbility={handleActivateAbility}
-          onDeployFlares={handleDeployFlares}
-          onAltitudeUp={handleAltitudeUp}
-          onAltitudeDown={handleAltitudeDown}
-          onPause={handlePause}
-        />
-      )}
-
-      {/* In-Game Pause Modal */}
-      {isPaused && (
-        <PauseModal
-          onResume={handleResume}
-          onRestart={handleRestart}
-          onSettings={() => {}}
-          onMainMenu={onAbortToMenu}
-        />
-      )}
-    </div>
+    <div
+      ref={containerRef}
+      className="w-full h-full relative select-none overflow-hidden cursor-grab active:cursor-grabbing"
+      id="countryballs-canvas-container"
+    />
   );
 };
