@@ -2,10 +2,10 @@ import { RacerState, TrackData, Obstacle, Particle, UserBoostPad } from '../type
 import { sound } from './audioSynth';
 
 export class PhysicsEngine {
-  private gravity = 0.38;
-  private airFriction = 0.992;
-  private ballRestitution = 0.75;
-  private wallRestitution = 0.7;
+  private gravity = 0.16;
+  private airFriction = 0.994;
+  private ballRestitution = 0.72;
+  private wallRestitution = 0.68;
 
   public update(
     racers: RacerState[],
@@ -20,10 +20,10 @@ export class PhysicsEngine {
     // 1. Update Obstacles Animation (Rotations, Lasers)
     for (const obs of track.obstacles) {
       if (obs.rotationSpeed !== 0) {
-        obs.rotation += obs.rotationSpeed * clampedDt;
+        obs.rotation += obs.rotationSpeed * clampedDt * 0.7;
       }
       if (obs.type === 'LASER_GATE' && obs.phase !== undefined) {
-        obs.phase += 0.05 * clampedDt;
+        obs.phase += 0.035 * clampedDt;
         obs.laserActive = Math.sin(obs.phase) > -0.2;
       }
     }
@@ -33,15 +33,15 @@ export class PhysicsEngine {
       const racer = racers[i];
       if (racer.isEliminated) continue;
 
-      // Apply Gravity
+      // Apply Gravity (tuned for smooth, graceful marble physics)
       racer.vy += this.gravity * racer.ball.weightMultiplier * clampedDt;
 
       // Apply Air Friction
       racer.vx *= this.airFriction;
       racer.vy *= this.airFriction;
 
-      // Speed limits
-      const maxSpeed = 32 * racer.ball.speedMultiplier;
+      // Speed limits - kept moderate so viewer can track country flags easily
+      const maxSpeed = 13.5 * racer.ball.speedMultiplier;
       const currentSpeed = Math.hypot(racer.vx, racer.vy);
       if (currentSpeed > maxSpeed) {
         const ratio = maxSpeed / currentSpeed;

@@ -1,4 +1,4 @@
-export type CameraMode = 'LEADER_LOCK' | 'PACK_VIEW' | 'OVERVIEW';
+export type CameraMode = 'LEADER_LOCK' | 'WINNER_CLOSEUP' | 'PACK_VIEW' | 'OVERVIEW';
 
 export type GameMode = 'AUTO_PILOT' | 'INTERACTIVE';
 

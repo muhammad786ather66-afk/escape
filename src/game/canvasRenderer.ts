@@ -70,36 +70,43 @@ export class CanvasRenderer {
     cameraMode: CameraMode
   ) {
     const leader = racers.find((r) => r.rank === 1 && !r.isEliminated) || racers[0];
+    const finishedLeader = racers.find((r) => r.isFinished && r.finishRank === 1) || leader;
 
     let targetX = track.width / 2;
     let targetY = 200;
     let targetZoom = 1.0;
 
-    if (cameraMode === 'LEADER_LOCK' && leader) {
+    if (cameraMode === 'WINNER_CLOSEUP' && (finishedLeader || leader)) {
+      const focus = finishedLeader || leader;
+      this.targetRacerId = focus.id;
+      targetX = focus.x;
+      targetY = focus.y;
+      targetZoom = Math.min(2.5, Math.max(1.8, canvasHeight / 380));
+    } else if (cameraMode === 'LEADER_LOCK' && leader) {
       this.targetRacerId = leader.id;
       targetX = leader.x;
-      targetY = leader.y + 60; // look ahead slightly down-track
-      targetZoom = Math.min(1.4, canvasHeight / 620);
+      targetY = leader.y + 40; // centered and steady
+      targetZoom = Math.min(1.85, Math.max(1.4, canvasHeight / 480));
     } else if (cameraMode === 'PACK_VIEW') {
       const activeRacers = racers.filter((r) => !r.isEliminated).slice(0, 5);
       if (activeRacers.length > 0) {
         const avgX = activeRacers.reduce((s, r) => s + r.x, 0) / activeRacers.length;
         const avgY = activeRacers.reduce((s, r) => s + r.y, 0) / activeRacers.length;
         targetX = avgX;
-        targetY = avgY + 40;
-        targetZoom = Math.min(1.15, canvasHeight / 720);
+        targetY = avgY + 30;
+        targetZoom = Math.min(1.35, canvasHeight / 640);
       }
     } else {
       // OVERVIEW
       targetX = track.width / 2;
       targetY = leader ? leader.y : track.height / 2;
-      targetZoom = Math.min(0.85, canvasWidth / track.width);
+      targetZoom = Math.min(0.95, canvasWidth / track.width);
     }
 
     // Smooth lerp camera translation
-    this.cameraX += (targetX - this.cameraX) * 0.08;
-    this.cameraY += (targetY - this.cameraY) * 0.08;
-    this.cameraZoom += (targetZoom - this.cameraZoom) * 0.05;
+    this.cameraX += (targetX - this.cameraX) * 0.09;
+    this.cameraY += (targetY - this.cameraY) * 0.09;
+    this.cameraZoom += (targetZoom - this.cameraZoom) * 0.06;
   }
 
   private drawBackground(ctx: CanvasRenderingContext2D, track: TrackData) {
@@ -424,6 +431,7 @@ export class CanvasRenderer {
   private drawRacers(ctx: CanvasRenderingContext2D, racers: RacerState[]) {
     // Sort so leaders and jumping balls are drawn on top
     const sortedRacers = racers.slice().sort((a, b) => a.y - b.y);
+    const time = performance.now() * 0.003;
 
     sortedRacers.forEach((racer) => {
       if (racer.isEliminated) return;
@@ -435,29 +443,53 @@ export class CanvasRenderer {
       ctx.scale(racer.squishX, racer.squishY);
 
       // Ball Drop Shadow
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
       ctx.beginPath();
-      ctx.ellipse(0, racer.radius + 3, racer.radius * 0.85, 5, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, racer.radius + 4, racer.radius * 0.9, 6, 0, 0, Math.PI * 2);
       ctx.fill();
+
+      // Winner / 1st Place Golden Halo & Radiant Champion Rays
+      if (racer.rank === 1) {
+        ctx.save();
+        // Pulsing Golden Aura
+        const pulse = 1 + 0.15 * Math.sin(time * 6);
+        ctx.strokeStyle = racer.isFinished ? '#f59e0b' : '#facc15';
+        ctx.lineWidth = 3.5;
+        ctx.shadowColor = '#facc15';
+        ctx.shadowBlur = racer.isFinished ? 24 : 16;
+        ctx.beginPath();
+        ctx.arc(0, 0, (racer.radius + 6) * pulse, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Radiating Champion Star Rays
+        if (racer.isFinished) {
+          ctx.save();
+          ctx.rotate(time * 2);
+          ctx.strokeStyle = 'rgba(250, 204, 21, 0.45)';
+          ctx.lineWidth = 2;
+          for (let ray = 0; ray < 8; ray++) {
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            const ang = (ray * Math.PI) / 4;
+            ctx.lineTo(Math.cos(ang) * (racer.radius * 2.2), Math.sin(ang) * (racer.radius * 2.2));
+            ctx.stroke();
+          }
+          ctx.restore();
+        }
+        ctx.restore();
+      }
 
       // Boost Glow if active
       if (racer.boostTimer > 0) {
         ctx.shadowColor = '#38bdf8';
-        ctx.shadowBlur = 18;
+        ctx.shadowBlur = 22;
       }
 
-      // 1st Place Golden Crown Halo
-      if (racer.rank === 1 && !racer.isFinished) {
-        ctx.strokeStyle = '#facc15';
-        ctx.lineWidth = 3;
-        ctx.shadowColor = '#facc15';
-        ctx.shadowBlur = 12;
-        ctx.beginPath();
-        ctx.arc(0, 0, racer.radius + 5, 0, Math.PI * 2);
-        ctx.stroke();
-      }
+      // Outer Ball Rim (crisp definition against any background)
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.lineWidth = 1.5;
 
-      // Rotate flag inside ball
+      // Rotate flag inside ball with ball rolling
       ctx.save();
       ctx.rotate(racer.rotation);
 
@@ -469,46 +501,93 @@ export class CanvasRenderer {
       // Render Countryball Flag
       this.drawCountryballFlag(ctx, racer.ball, racer.radius);
 
-      // Shading / Sphere gradient highlight
+      // 3D Sphere Shading / Light Highlight
       const grad = ctx.createRadialGradient(
         -racer.radius * 0.35,
         -racer.radius * 0.35,
-        racer.radius * 0.1,
+        racer.radius * 0.08,
         0,
         0,
         racer.radius
       );
       grad.addColorStop(0, 'rgba(255, 255, 255, 0.45)');
-      grad.addColorStop(0.6, 'rgba(255, 255, 255, 0.0)');
-      grad.addColorStop(1, 'rgba(0, 0, 0, 0.55)');
+      grad.addColorStop(0.5, 'rgba(255, 255, 255, 0.05)');
+      grad.addColorStop(0.85, 'rgba(0, 0, 0, 0.25)');
+      grad.addColorStop(1, 'rgba(0, 0, 0, 0.65)');
 
       ctx.fillStyle = grad;
       ctx.beginPath();
       ctx.arc(0, 0, racer.radius, 0, Math.PI * 2);
       ctx.fill();
 
-      ctx.restore(); // restore rotation for eyes & hat so they stay upright
+      ctx.restore(); // restore rotation for eyes, accessories & badges
 
-      // Draw Cartoon Eyes
+      // Outer Ball Rim Stroke
+      ctx.beginPath();
+      ctx.arc(0, 0, racer.radius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Draw Cartoon Eyes (Keep upright)
       this.drawCountryballEyes(ctx, racer);
 
-      // Draw Countryball Hat / Accessory
+      // Draw Countryball Hat / Accessory (Keep upright)
       this.drawAccessory(ctx, racer.ball.accessory, racer.radius);
 
-      // Rank Badge on ball
-      ctx.fillStyle = racer.rank === 1 ? '#facc15' : 'rgba(15, 23, 42, 0.85)';
+      // 1st Place Crown on top
+      if (racer.rank === 1) {
+        ctx.save();
+        ctx.fillStyle = '#facc15';
+        ctx.shadowColor = '#facc15';
+        ctx.shadowBlur = 8;
+        const cy = -racer.radius - 18;
+        ctx.beginPath();
+        ctx.moveTo(-10, cy + 6);
+        ctx.lineTo(-12, cy - 6);
+        ctx.lineTo(-4, cy);
+        ctx.lineTo(0, cy - 8);
+        ctx.lineTo(4, cy);
+        ctx.lineTo(12, cy - 6);
+        ctx.lineTo(10, cy + 6);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // Floating Country Name & Flag Tag (Always clearly identifies the country)
+      const labelY = racer.radius + 16;
+      const tagText = `${racer.ball.flagEmoji} ${racer.ball.name}`;
+      ctx.font = 'bold 10px sans-serif';
+      const textWidth = ctx.measureText(tagText).width;
+
+      // Dark translucent pill behind country name
+      ctx.fillStyle = racer.rank === 1 ? 'rgba(250, 204, 21, 0.95)' : 'rgba(15, 23, 42, 0.88)';
+      ctx.strokeStyle = racer.rank === 1 ? '#eab308' : 'rgba(255, 255, 255, 0.25)';
+      ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.arc(0, -racer.radius - 12, 9, 0, Math.PI * 2);
+      ctx.roundRect(-textWidth / 2 - 6, labelY - 8, textWidth + 12, 16, 8);
+      ctx.fill();
+      ctx.stroke();
+
+      // Country text
+      ctx.fillStyle = racer.rank === 1 ? '#020617' : '#ffffff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(tagText, 0, labelY);
+
+      // Rank Badge on Top
+      ctx.fillStyle = racer.rank === 1 ? '#facc15' : racer.rank <= 3 ? '#38bdf8' : 'rgba(30, 41, 59, 0.9)';
+      ctx.beginPath();
+      ctx.arc(0, -racer.radius - 8, 8, 0, Math.PI * 2);
       ctx.fill();
       ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = 1.2;
       ctx.stroke();
 
       ctx.fillStyle = racer.rank === 1 ? '#000000' : '#ffffff';
-      ctx.font = 'bold 9px sans-serif';
+      ctx.font = 'black 8.5px monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(`#${racer.rank}`, 0, -racer.radius - 12);
+      ctx.fillText(`#${racer.rank}`, 0, -racer.radius - 8);
 
       ctx.restore();
     });
@@ -521,25 +600,30 @@ export class CanvasRenderer {
 
     switch (ball.id) {
       case 'turkey': {
-        // Red with White Crescent and 5-Pointed Star
+        // Turkey: Crimson Red with White Crescent and 5-Pointed Star
+        ctx.fillStyle = '#E30A17';
+        ctx.fillRect(-r, -r, d, d);
+
+        // White Crescent Moon outer
         ctx.fillStyle = '#ffffff';
         ctx.beginPath();
-        ctx.arc(-r * 0.1, 0, r * 0.55, 0, Math.PI * 2);
+        ctx.arc(-r * 0.12, 0, r * 0.52, 0, Math.PI * 2);
         ctx.fill();
 
+        // Inner Red Cutout circle
         ctx.fillStyle = '#E30A17';
         ctx.beginPath();
-        ctx.arc(r * 0.05, 0, r * 0.44, 0, Math.PI * 2);
+        ctx.arc(r * 0.04, 0, r * 0.41, 0, Math.PI * 2);
         ctx.fill();
 
-        // Star
+        // 5-Pointed Star
         ctx.fillStyle = '#ffffff';
-        this.drawStar(ctx, r * 0.35, 0, 5, r * 0.22, r * 0.1);
+        this.drawStar(ctx, r * 0.32, 0, 5, r * 0.22, r * 0.09);
         break;
       }
 
       case 'germany': {
-        // Black, Red, Gold Horizontal Stripes
+        // Germany: Black, Red, Gold Horizontal Stripes
         ctx.fillStyle = '#000000';
         ctx.fillRect(-r, -r, d, d / 3);
         ctx.fillStyle = '#DD0000';
@@ -550,7 +634,7 @@ export class CanvasRenderer {
       }
 
       case 'france': {
-        // Blue, White, Red Vertical Stripes
+        // France: Blue, White, Red Vertical Stripes
         ctx.fillStyle = '#002654';
         ctx.fillRect(-r, -r, d / 3, d);
         ctx.fillStyle = '#FFFFFF';
@@ -561,15 +645,15 @@ export class CanvasRenderer {
       }
 
       case 'brazil': {
-        // Green field, Yellow Rhombus, Blue Circle
+        // Brazil: Green field, Yellow Rhombus, Blue Circle with Equator Band
         ctx.fillStyle = '#009739';
         ctx.fillRect(-r, -r, d, d);
 
         ctx.fillStyle = '#FEDD00';
         ctx.beginPath();
-        ctx.moveTo(0, -r * 0.75);
+        ctx.moveTo(0, -r * 0.72);
         ctx.lineTo(r * 0.85, 0);
-        ctx.lineTo(0, r * 0.75);
+        ctx.lineTo(0, r * 0.72);
         ctx.lineTo(-r * 0.85, 0);
         ctx.closePath();
         ctx.fill();
@@ -581,26 +665,49 @@ export class CanvasRenderer {
 
         // White curved band
         ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 3;
+        ctx.lineWidth = 2.5;
         ctx.beginPath();
-        ctx.arc(0, r * 0.15, r * 0.38, Math.PI * 1.05, Math.PI * 1.85);
+        ctx.arc(0, r * 0.12, r * 0.38, Math.PI * 1.08, Math.PI * 1.85);
         ctx.stroke();
+
+        // Tiny white stars
+        ctx.fillStyle = '#ffffff';
+        [-r * 0.15, 0, r * 0.15].forEach((ox, idx) => {
+          ctx.beginPath();
+          ctx.arc(ox, r * 0.15 + (idx % 2) * 2, 1.2, 0, Math.PI * 2);
+          ctx.fill();
+        });
         break;
       }
 
       case 'usa': {
-        // Red and White horizontal stripes + Blue canton
+        // USA: Red & White horizontal stripes + Blue canton + Stars
         for (let s = 0; s < 7; s++) {
           ctx.fillStyle = s % 2 === 0 ? '#B22234' : '#FFFFFF';
           ctx.fillRect(-r, -r + s * (d / 7), d, d / 7);
         }
         ctx.fillStyle = '#3C3B6E';
-        ctx.fillRect(-r, -r, d * 0.55, d * 0.5);
+        ctx.fillRect(-r, -r, d * 0.52, d * 0.5);
+
+        // White stars in canton
+        ctx.fillStyle = '#ffffff';
+        for (let row = 0; row < 3; row++) {
+          for (let col = 0; col < 3; col++) {
+            this.drawStar(
+              ctx,
+              -r + 4 + col * (d * 0.2),
+              -r + 4 + row * (d * 0.18),
+              5,
+              2.5,
+              1.2
+            );
+          }
+        }
         break;
       }
 
       case 'japan': {
-        // White field + Red Sun disc
+        // Japan: White field with Crimson Red Sun (Hinomaru)
         ctx.fillStyle = '#FFFFFF';
         ctx.fillRect(-r, -r, d, d);
         ctx.fillStyle = '#BC002D';
@@ -611,13 +718,13 @@ export class CanvasRenderer {
       }
 
       case 'uk': {
-        // Union Jack
+        // UK: Union Jack with layered crosses and saltires
         ctx.fillStyle = '#012169';
         ctx.fillRect(-r, -r, d, d);
 
-        // White diagonal saltire
+        // White diagonal saltires
         ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 10;
+        ctx.lineWidth = r * 0.35;
         ctx.beginPath();
         ctx.moveTo(-r, -r);
         ctx.lineTo(r, r);
@@ -625,25 +732,25 @@ export class CanvasRenderer {
         ctx.lineTo(r, -r);
         ctx.stroke();
 
-        // Red diagonal
+        // Red diagonal saltires
         ctx.strokeStyle = '#C8102E';
-        ctx.lineWidth = 5;
+        ctx.lineWidth = r * 0.16;
         ctx.stroke();
 
-        // White cross
+        // White central cross
         ctx.fillStyle = '#ffffff';
-        ctx.fillRect(-r, -6, d, 12);
-        ctx.fillRect(-6, -r, 12, d);
+        ctx.fillRect(-r, -r * 0.28, d, r * 0.56);
+        ctx.fillRect(-r * 0.28, -r, r * 0.56, d);
 
-        // Red cross
+        // Red central cross
         ctx.fillStyle = '#C8102E';
-        ctx.fillRect(-r, -3.5, d, 7);
-        ctx.fillRect(-3.5, -r, 7, d);
+        ctx.fillRect(-r, -r * 0.16, d, r * 0.32);
+        ctx.fillRect(-r * 0.16, -r, r * 0.32, d);
         break;
       }
 
       case 'italy': {
-        // Green, White, Red Vertical
+        // Italy: Green, White, Red Vertical
         ctx.fillStyle = '#009246';
         ctx.fillRect(-r, -r, d / 3, d);
         ctx.fillStyle = '#FFFFFF';
@@ -654,7 +761,7 @@ export class CanvasRenderer {
       }
 
       case 'poland': {
-        // Red on top, White on bottom (Classic Polandball inverted rule)
+        // Poland: Red on top, White on bottom (Classic Polandball inverted rule)
         ctx.fillStyle = '#DC143C';
         ctx.fillRect(-r, -r, d, d / 2);
         ctx.fillStyle = '#FFFFFF';
@@ -663,21 +770,22 @@ export class CanvasRenderer {
       }
 
       case 'canada': {
-        // Red, White, Red
+        // Canada: Red, White, Red with Red Maple Leaf
         ctx.fillStyle = '#FF0000';
         ctx.fillRect(-r, -r, d / 4, d);
         ctx.fillRect(r - d / 4, -r, d / 4, d);
         ctx.fillStyle = '#FFFFFF';
         ctx.fillRect(-r + d / 4, -r, d / 2, d);
 
-        // Red Maple Leaf center
+        // Red Maple Leaf emblem
         ctx.fillStyle = '#FF0000';
-        this.drawStar(ctx, 0, 0, 5, r * 0.35, r * 0.15);
+        this.drawStar(ctx, 0, -r * 0.05, 5, r * 0.32, r * 0.14);
+        ctx.fillRect(-1.5, r * 0.15, 3, r * 0.18); // stem
         break;
       }
 
       case 'mexico': {
-        // Green, White, Red Vertical + Eagle emblem
+        // Mexico: Green, White, Red Vertical + Eagle emblem
         ctx.fillStyle = '#006847';
         ctx.fillRect(-r, -r, d / 3, d);
         ctx.fillStyle = '#FFFFFF';
@@ -685,51 +793,73 @@ export class CanvasRenderer {
         ctx.fillStyle = '#CE1126';
         ctx.fillRect(-r + (2 * d) / 3, -r, d / 3, d);
 
-        ctx.fillStyle = '#78350f';
+        // Center Coat of Arms Eagle
+        ctx.fillStyle = '#854d0e';
         ctx.beginPath();
-        ctx.arc(0, 0, r * 0.18, 0, Math.PI * 2);
+        ctx.arc(0, -r * 0.05, r * 0.16, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#ca8a04';
+        ctx.beginPath();
+        ctx.arc(0, r * 0.08, r * 0.12, 0, Math.PI);
         ctx.fill();
         break;
       }
 
       case 'argentina': {
-        // Cyan, White, Cyan + Sun of May
+        // Argentina: Cyan, White, Cyan Horizontal + Golden Sun of May
         ctx.fillStyle = '#74ACDF';
         ctx.fillRect(-r, -r, d, d / 3);
         ctx.fillRect(-r, -r + (2 * d) / 3, d, d / 3);
         ctx.fillStyle = '#FFFFFF';
         ctx.fillRect(-r, -r + d / 3, d, d / 3);
 
-        // Sun
+        // Golden Sun of May
         ctx.fillStyle = '#F6B40E';
         ctx.beginPath();
-        ctx.arc(0, 0, r * 0.2, 0, Math.PI * 2);
+        ctx.arc(0, 0, r * 0.18, 0, Math.PI * 2);
         ctx.fill();
+
+        // Radiating rays
+        ctx.strokeStyle = '#F6B40E';
+        ctx.lineWidth = 1.5;
+        for (let i = 0; i < 8; i++) {
+          const ang = (i * Math.PI) / 4;
+          ctx.beginPath();
+          ctx.moveTo(Math.cos(ang) * (r * 0.18), Math.sin(ang) * (r * 0.18));
+          ctx.lineTo(Math.cos(ang) * (r * 0.28), Math.sin(ang) * (r * 0.28));
+          ctx.stroke();
+        }
         break;
       }
 
       case 'spain': {
-        // Red, Yellow (double width), Red
+        // Spain: Red, Yellow (double width), Red + Coat of Arms
         ctx.fillStyle = '#AA151B';
         ctx.fillRect(-r, -r, d, d / 4);
         ctx.fillRect(-r, r - d / 4, d, d / 4);
         ctx.fillStyle = '#F1BF00';
         ctx.fillRect(-r, -r + d / 4, d, d / 2);
+
+        // Spanish Coat of Arms Shield
+        ctx.fillStyle = '#AA151B';
+        ctx.fillRect(-r * 0.45, -r * 0.15, r * 0.28, r * 0.32);
+        ctx.fillStyle = '#F1BF00';
+        ctx.fillRect(-r * 0.38, -r * 0.08, r * 0.14, r * 0.18);
         break;
       }
 
       case 'sweden': {
-        // Blue with Yellow Nordic Cross
+        // Sweden: Blue field with Yellow Nordic Cross
         ctx.fillStyle = '#006AA7';
         ctx.fillRect(-r, -r, d, d);
         ctx.fillStyle = '#FECC00';
-        ctx.fillRect(-r, -4, d, 8);
-        ctx.fillRect(-r * 0.35, -r, 8, d);
+        ctx.fillRect(-r, -r * 0.15, d, r * 0.3); // horizontal bar
+        ctx.fillRect(-r * 0.35, -r, r * 0.3, d); // vertical bar
         break;
       }
 
       case 'india': {
-        // Saffron, White, Green + Ashoka Chakra
+        // India: Saffron, White, Green + Ashoka Chakra with Spokes
         ctx.fillStyle = '#FF9933';
         ctx.fillRect(-r, -r, d, d / 3);
         ctx.fillStyle = '#FFFFFF';
@@ -737,23 +867,53 @@ export class CanvasRenderer {
         ctx.fillStyle = '#138808';
         ctx.fillRect(-r, -r + (2 * d) / 3, d, d / 3);
 
-        // Chakra wheel
+        // 24-spoke Navy Blue Ashoka Chakra
         ctx.strokeStyle = '#000080';
-        ctx.lineWidth = 1.5;
+        ctx.lineWidth = 1.6;
         ctx.beginPath();
         ctx.arc(0, 0, r * 0.18, 0, Math.PI * 2);
         ctx.stroke();
+
+        for (let s = 0; s < 8; s++) {
+          const ang = (s * Math.PI) / 4;
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(Math.cos(ang) * (r * 0.17), Math.sin(ang) * (r * 0.17));
+          ctx.stroke();
+        }
         break;
       }
 
       case 'australia': {
-        // Blue field with Union Jack canton & stars
+        // Australia: Deep Blue, Union Jack in Canton + Southern Cross stars
         ctx.fillStyle = '#00008B';
         ctx.fillRect(-r, -r, d, d);
+
+        // Mini Union Jack top-left
+        ctx.fillStyle = '#012169';
+        ctx.fillRect(-r, -r, d * 0.5, d * 0.45);
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-r, -r);
+        ctx.lineTo(-r + d * 0.5, -r + d * 0.45);
+        ctx.moveTo(-r, -r + d * 0.45);
+        ctx.lineTo(-r + d * 0.5, -r);
+        ctx.stroke();
+        ctx.fillStyle = '#C8102E';
+        ctx.fillRect(-r, -r + d * 0.18, d * 0.5, 3);
+        ctx.fillRect(-r + d * 0.22, -r, 3, d * 0.45);
+
+        // Commonwealth 7-point Star
         ctx.fillStyle = '#ffffff';
-        this.drawStar(ctx, r * 0.35, -r * 0.2, 5, 4, 2);
-        this.drawStar(ctx, r * 0.5, r * 0.2, 5, 5, 2.5);
-        this.drawStar(ctx, -r * 0.3, r * 0.3, 7, 6, 3);
+        this.drawStar(ctx, -r * 0.35, r * 0.35, 7, 5, 2.5);
+
+        // Southern Cross stars
+        this.drawStar(ctx, r * 0.45, -r * 0.3, 5, 3.5, 1.8);
+        this.drawStar(ctx, r * 0.6, 0, 5, 3.5, 1.8);
+        this.drawStar(ctx, r * 0.35, r * 0.4, 5, 3.5, 1.8);
+        this.drawStar(ctx, r * 0.2, 0, 5, 3, 1.5);
+        this.drawStar(ctx, r * 0.48, r * 0.18, 5, 2, 1);
         break;
       }
     }

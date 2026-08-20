@@ -39,19 +39,20 @@ interface AutoRunnerGameProps {
 
 export const AutoRunnerGame: React.FC<AutoRunnerGameProps> = ({ initialLevel = 1 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const winnerCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Core Game State
   const [level, setLevel] = useState<number>(initialLevel);
   const [gameMode, setGameMode] = useState<GameMode>('AUTO_PILOT');
   const [cameraMode, setCameraMode] = useState<CameraMode>('LEADER_LOCK');
-  const [simSpeed, setSimSpeed] = useState<number>(1.0);
+  const [simSpeed, setSimSpeed] = useState<number>(0.75); // Calibrated gentle speed for clear watching
   const [isPaused, setIsPaused] = useState<boolean>(false);
   const [sfxMuted, setSfxMuted] = useState<boolean>(false);
   const [musicMuted, setMusicMuted] = useState<boolean>(true); // start music muted for autoplay browser restrictions
 
   // Victory / Level Transition State
   const [winnerInfo, setWinnerInfo] = useState<RaceWinnerInfo | null>(null);
-  const [nextLevelCountdown, setNextLevelCountdown] = useState<number>(3);
+  const [nextLevelCountdown, setNextLevelCountdown] = useState<number>(4);
   const [updateInfo, setUpdateInfo] = useState<VersionInfo | null>(null);
 
   // Telemetry state for HUD
@@ -83,13 +84,13 @@ export const AutoRunnerGame: React.FC<AutoRunnerGameProps> = ({ initialLevel = 1
     };
   }, []);
 
-  // Spawn racers on starting grid
+  // Spawn racers on starting grid with larger 26px radius for clear flag watching
   const spawnRacers = useCallback((track: TrackData) => {
     const racers: RacerState[] = [];
     const count = 16;
     const cols = 4;
-    const spacingX = 36;
-    const spacingY = 40;
+    const spacingX = 52;
+    const spacingY = 56;
 
     for (let i = 0; i < count; i++) {
       const ballDef = COUNTRYBALLS[i % COUNTRYBALLS.length];
@@ -103,11 +104,11 @@ export const AutoRunnerGame: React.FC<AutoRunnerGameProps> = ({ initialLevel = 1
         ball: ballDef,
         x: track.startX + offsetX,
         y: track.startY + offsetY,
-        vx: (Math.random() * 2 - 1) * 1.5,
-        vy: 1 + Math.random() * 2,
-        radius: 18,
+        vx: (Math.random() * 2 - 1) * 0.8,
+        vy: 0.8 + Math.random() * 1.2,
+        radius: 26, // Large high-definition flag sphere
         mass: 1.0 * ballDef.weightMultiplier,
-        bounciness: 0.85 * ballDef.bounceMultiplier,
+        bounciness: 0.82 * ballDef.bounceMultiplier,
         rotation: 0,
         angularVelocity: 0,
         squishX: 1,
@@ -138,7 +139,8 @@ export const AutoRunnerGame: React.FC<AutoRunnerGameProps> = ({ initialLevel = 1
       raceStartTimeRef.current = Date.now();
       isFinishedRef.current = false;
       setWinnerInfo(null);
-      setNextLevelCountdown(3);
+      setNextLevelCountdown(4);
+      setCameraMode('LEADER_LOCK');
 
       sound.playLevelUp();
     },
@@ -155,6 +157,9 @@ export const AutoRunnerGame: React.FC<AutoRunnerGameProps> = ({ initialLevel = 1
     (winningRacer: RacerState) => {
       if (isFinishedRef.current) return;
       isFinishedRef.current = true;
+
+      // Automatically zoom into winning marble for high-definition close-up
+      setCameraMode('WINNER_CLOSEUP');
 
       const duration = (Date.now() - raceStartTimeRef.current) / 1000;
       sound.playVictoryFanfare();
@@ -180,10 +185,10 @@ export const AutoRunnerGame: React.FC<AutoRunnerGameProps> = ({ initialLevel = 1
       };
 
       setWinnerInfo(winInfo);
-      setNextLevelCountdown(3);
+      setNextLevelCountdown(4);
 
-      // Start 3-second countdown to automatically advance to the next level
-      let remaining = 3;
+      // Start 4-second countdown to automatically advance to the next level
+      let remaining = 4;
       if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
       countdownIntervalRef.current = window.setInterval(() => {
         remaining -= 1;
@@ -193,7 +198,7 @@ export const AutoRunnerGame: React.FC<AutoRunnerGameProps> = ({ initialLevel = 1
         }
       }, 1000);
 
-      // Automatically advance after 3.2 seconds
+      // Automatically advance after 4.2 seconds
       if (victoryTimerRef.current) clearTimeout(victoryTimerRef.current);
       victoryTimerRef.current = window.setTimeout(() => {
         // If Cloudflare has deployed a new version, hard reload on level change
@@ -201,9 +206,9 @@ export const AutoRunnerGame: React.FC<AutoRunnerGameProps> = ({ initialLevel = 1
           versionChecker.forceHardReload();
           return;
         }
-        // Advance level
+        // Advance level automatically
         setLevel((prev) => prev + 1);
-      }, 3200);
+      }, 4200);
     },
     [level]
   );
@@ -436,16 +441,24 @@ export const AutoRunnerGame: React.FC<AutoRunnerGameProps> = ({ initialLevel = 1
           <button
             onClick={() =>
               setCameraMode((c) =>
-                c === 'LEADER_LOCK' ? 'PACK_VIEW' : c === 'PACK_VIEW' ? 'OVERVIEW' : 'LEADER_LOCK'
+                c === 'LEADER_LOCK'
+                  ? 'WINNER_CLOSEUP'
+                  : c === 'WINNER_CLOSEUP'
+                  ? 'PACK_VIEW'
+                  : c === 'PACK_VIEW'
+                  ? 'OVERVIEW'
+                  : 'LEADER_LOCK'
               )
             }
             className="px-3 py-2 rounded-2xl bg-slate-900/90 hover:bg-slate-800 border border-white/20 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-lg active:scale-95"
-            title="Cycle Camera Modes (Target Lock, Pack View, Full Overview)"
+            title="Cycle Camera Modes (Target Lock, Winner Close-Up, Pack View, Full Overview)"
           >
             <Crosshair size={14} className="text-amber-400" />
             <span className="hidden md:inline">
               {cameraMode === 'LEADER_LOCK'
                 ? '🎯 TARGET LOCK'
+                : cameraMode === 'WINNER_CLOSEUP'
+                ? '🔍 CLOSE-UP'
                 : cameraMode === 'PACK_VIEW'
                 ? '👥 PACK VIEW'
                 : '🗺️ OVERVIEW'}
@@ -455,15 +468,17 @@ export const AutoRunnerGame: React.FC<AutoRunnerGameProps> = ({ initialLevel = 1
           {/* Speed Multiplier Button */}
           <button
             onClick={() => {
-              const speeds = [1.0, 1.5, 2.0, 3.0];
+              const speeds = [0.4, 0.75, 1.0, 1.5];
               const next = speeds[(speeds.indexOf(simSpeed) + 1) % speeds.length];
               setSimSpeed(next);
             }}
             className="px-2.5 py-2 rounded-2xl bg-slate-900/90 hover:bg-slate-800 border border-white/20 text-cyan-300 text-xs font-mono font-bold flex items-center gap-1 transition cursor-pointer shadow-lg active:scale-95"
-            title="Speed Multiplier"
+            title="Speed Multiplier (Slow, Normal, Fast)"
           >
             <FastForward size={14} />
-            <span>{simSpeed}x</span>
+            <span>
+              {simSpeed === 0.4 ? '0.4x (Slow-Mo)' : simSpeed === 0.75 ? '0.75x (Relaxed)' : `${simSpeed}x`}
+            </span>
           </button>
 
           {/* SFX Mute Button */}
@@ -599,19 +614,25 @@ export const AutoRunnerGame: React.FC<AutoRunnerGameProps> = ({ initialLevel = 1
         </div>
       </div>
 
-      {/* 3-SECOND AUTOMATIC VICTORY POP-UP MODAL */}
+      {/* 4-SECOND AUTOMATIC VICTORY POP-UP MODAL WITH HD BALL SHOWCASE */}
       {winnerInfo && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-fade-in pointer-events-auto">
-          <div className="bg-slate-900 border-2 border-amber-400/80 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-[0_0_50px_rgba(250,204,21,0.3)] text-center relative overflow-hidden flex flex-col items-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in pointer-events-auto">
+          <div className="bg-slate-900 border-2 border-amber-400/90 rounded-3xl p-6 max-w-md w-full shadow-[0_0_60px_rgba(250,204,21,0.4)] text-center relative overflow-hidden flex flex-col items-center">
             {/* Ambient gold glow */}
-            <div className="absolute -top-20 -left-20 w-48 h-48 bg-amber-500/20 rounded-full blur-3xl pointer-events-none" />
-            <div className="absolute -bottom-20 -right-20 w-48 h-48 bg-cyan-500/20 rounded-full blur-3xl pointer-events-none" />
+            <div className="absolute -top-20 -left-20 w-48 h-48 bg-amber-500/25 rounded-full blur-3xl pointer-events-none" />
+            <div className="absolute -bottom-20 -right-20 w-48 h-48 bg-cyan-500/25 rounded-full blur-3xl pointer-events-none" />
 
-            <div className="text-5xl sm:text-6xl mb-2 animate-bounce">
-              {winnerInfo.winner.flagEmoji}
+            {/* Winner Ball Close-up Card */}
+            <div className="relative my-2 p-3 flex flex-col items-center">
+              <div className="text-6xl sm:text-7xl mb-1 filter drop-shadow-[0_0_20px_rgba(250,204,21,0.6)] animate-pulse">
+                {winnerInfo.winner.flagEmoji}
+              </div>
+              <div className="text-xs font-black uppercase text-amber-400 tracking-wider flex items-center gap-1">
+                <span>👑 WINNER CLOSE-UP 👑</span>
+              </div>
             </div>
 
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-400/20 border border-amber-400/40 text-amber-300 font-mono text-xs font-bold mb-2">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-400/20 border border-amber-400/50 text-amber-300 font-mono text-xs font-bold mb-2 shadow">
               <Trophy size={14} className="text-amber-400" />
               <span>STAGE {winnerInfo.level} CHAMPION</span>
             </div>
@@ -619,19 +640,23 @@ export const AutoRunnerGame: React.FC<AutoRunnerGameProps> = ({ initialLevel = 1
             <h2 className="text-2xl sm:text-3xl font-black text-white tracking-wide uppercase drop-shadow mb-1">
               {winnerInfo.winner.name} WINS!
             </h2>
-            <p className="text-xs text-gray-300 mb-4 font-mono">
+            <p className="text-xs text-gray-300 mb-3 font-mono">
               Time: {winnerInfo.finishTime.toFixed(2)}s · Trait: {winnerInfo.winner.trait}
             </p>
 
             {/* Podium Overview */}
-            <div className="w-full bg-slate-950/70 border border-white/10 rounded-2xl p-3 mb-5 space-y-1.5">
+            <div className="w-full bg-slate-950/80 border border-white/10 rounded-2xl p-3 mb-4 space-y-1.5">
               <div className="text-[10px] font-mono text-gray-400 uppercase tracking-wider text-left mb-1 font-bold">
-                TOP FINISHERS
+                STAGE TOP 3 PODIUM
               </div>
               {winnerInfo.podium.map((p) => (
                 <div
                   key={p.ball.id}
-                  className="flex items-center justify-between text-xs py-1 px-2 rounded-lg bg-white/5 text-white"
+                  className={`flex items-center justify-between text-xs py-1.5 px-2.5 rounded-xl border ${
+                    p.rank === 1
+                      ? 'bg-amber-500/20 border-amber-400/50 text-amber-200 font-bold'
+                      : 'bg-white/5 border-white/5 text-white'
+                  }`}
                 >
                   <div className="flex items-center gap-2">
                     <span
@@ -645,7 +670,7 @@ export const AutoRunnerGame: React.FC<AutoRunnerGameProps> = ({ initialLevel = 1
                     >
                       #{p.rank}
                     </span>
-                    <span>{p.ball.flagEmoji}</span>
+                    <span className="text-base">{p.ball.flagEmoji}</span>
                     <span className="font-bold">{p.ball.name}</span>
                   </div>
                   <span className="font-mono text-gray-300 text-[11px]">
@@ -661,10 +686,10 @@ export const AutoRunnerGame: React.FC<AutoRunnerGameProps> = ({ initialLevel = 1
                 <span>AUTO-ADVANCING TO LEVEL {level + 1}...</span>
                 <span>{nextLevelCountdown}s</span>
               </div>
-              <div className="w-full h-2 bg-slate-950 rounded-full overflow-hidden border border-white/10">
+              <div className="w-full h-2.5 bg-slate-950 rounded-full overflow-hidden border border-white/10">
                 <div
                   className="h-full bg-gradient-to-r from-amber-400 via-emerald-400 to-cyan-400 transition-all duration-1000 ease-linear"
-                  style={{ width: `${((4 - nextLevelCountdown) / 3) * 100}%` }}
+                  style={{ width: `${((5 - nextLevelCountdown) / 4) * 100}%` }}
                 />
               </div>
 
