@@ -2,17 +2,91 @@ export type CameraMode = 'LEADER_LOCK' | 'WINNER_CLOSEUP' | 'PACK_VIEW' | 'OVERV
 
 export type GameMode = 'AUTO_PILOT' | 'INTERACTIVE';
 
-export type TrackTheme =
-  | 'GRASSLAND'
+export type TrackThemeType =
+  | 'ICE'
+  | 'LAVA'
   | 'DESERT'
-  | 'CYBER_NEON'
-  | 'ICE_GLACIER'
-  | 'VOLCANO'
-  | 'SPACE_COSMOS'
-  | 'FACTORY'
-  | 'CANDY_LAND'
+  | 'SKY'
+  | 'CYBER'
+  | 'SPACE'
   | 'JUNGLE'
-  | 'SYNTHWAVE';
+  | 'OCEAN'
+  | 'FACTORY'
+  | 'GOLDEN'
+  | 'CANDY'
+  | 'AURORA';
+
+export type TrackMaterial =
+  | 'NEON_GRID'
+  | 'ICE_GLASS'
+  | 'MAGMA_ROCK'
+  | 'ANCIENT_GOLD'
+  | 'DEEP_CORAL'
+  | 'CLOCKWORK_BRASS'
+  | 'CANDY_JELLY'
+  | 'STARDUST_OBSIDIAN'
+  | 'CHROME_METALLIC'
+  | 'WOOD_TIMBER'
+  | 'CYBER_CIRCUIT'
+  | 'RAINBOW_AURORA'
+  | 'MARBLE_STONE'
+  | 'AERO_CLOUD'
+  | 'DESERT_SANDSTONE';
+
+export type TexturePatternType =
+  | 'ICE_CRACKS'
+  | 'LAVA_VEINS'
+  | 'DESERT_DUNES'
+  | 'SKY_CLOUDS'
+  | 'CYBER_CIRCUIT'
+  | 'SPACE_NEBULA'
+  | 'JUNGLE_CANOPY'
+  | 'OCEAN_CAUSTICS'
+  | 'STEAMPUNK_GEARS'
+  | 'GOLDEN_MOSAIC'
+  | 'CANDY_STRIPES'
+  | 'AURORA_WAVES';
+
+export type AmbientParticleType =
+  | 'SNOW'
+  | 'EMBER'
+  | 'SAND_DUST'
+  | 'CLOUD_MIST'
+  | 'CYBER_BIT'
+  | 'STAR_DUST'
+  | 'BUBBLE'
+  | 'SPORE'
+  | 'SPARK'
+  | 'CONFETTI'
+  | 'STEAM'
+  | 'AURORA_GLOW';
+
+export interface TrackPhysicsConfig {
+  gravity: number; // e.g. 0.11 (Sky/Space) to 0.22 (Lava/Heavy)
+  airFriction: number; // e.g. 0.988 (Sand/Mud) to 0.998 (Ice)
+  wallRestitution: number; // e.g. 0.55 (Damped Sand) to 0.95 (Super bouncy Cloud/Candy)
+  ballRestitution: number; // e.g. 0.65 to 0.92
+  windGustX: number; // Continuous or oscillating crosswind
+  windGustY: number; // Updraft / downdraft
+  surfaceSlickness: number; // Multiplier on ball rolling/skidding
+  physicsSummary: string; // User-facing badge text
+  ambientParticleType: AmbientParticleType;
+}
+
+export type FlagStyle =
+  | 'TRICOLOR_H'
+  | 'TRICOLOR_V'
+  | 'BICOLOR_H'
+  | 'BICOLOR_V'
+  | 'CROSS_NORDIC'
+  | 'SALTIRE'
+  | 'CANTON_STRIPES'
+  | 'SUN_DISC'
+  | 'CRESCENT_STAR'
+  | 'EMBLEM_CENTER'
+  | 'SOLID_STAR'
+  | 'DIAGONAL_SPLIT'
+  | 'CUSTOM';
 
 export interface CountryballDef {
   id: string;
@@ -22,23 +96,16 @@ export interface CountryballDef {
   primaryColor: string;
   secondaryColor: string;
   accentColor: string;
-  accessory:
-    | 'FEZ'
-    | 'STAHLHELM'
-    | 'BERET'
-    | 'HEADBAND'
-    | 'SUNGLASSES'
-    | 'HACHIMAKI'
-    | 'TOP_HAT'
-    | 'CHEF_HAT'
-    | 'PLUNGER'
-    | 'USHANKA'
-    | 'SOMBRERO'
-    | 'SUN_CAP'
-    | 'MATADOR'
-    | 'VIKING'
-    | 'TURBAN'
-    | 'CORK_HAT';
+  flagStyle: FlagStyle;
+  flagDetails?: {
+    stripeColors?: string[];
+    isVertical?: boolean;
+    emblemType?: 'STAR' | 'SUN' | 'CRESCENT' | 'CROSS' | 'MAPLE' | 'SHIELD' | 'EAGLE' | 'WHEEL' | 'DRAGON' | 'CIRCLES' | 'CEDAR';
+    emblemColor?: string;
+    cantonColor?: string;
+    secondaryEmblemColor?: string;
+  };
+  accessory: string;
   trait: string;
   speedMultiplier: number;
   bounceMultiplier: number;
@@ -70,9 +137,15 @@ export interface RacerState {
   lastY: number;
   boostTimer: number;
   color: string;
+  hazardHitTimer?: number; // for visual reaction on hitting cutter/fire
 }
 
 export type ObstacleType =
+  | 'FLAMETHROWER'
+  | 'LAVA_GEYSER'
+  | 'LAVA_RIVER'
+  | 'BUZZSAW_CUTTER'
+  | 'BLACK_HOLE'
   | 'PINBALL_BUMPER'
   | 'SPINNING_HAMMER'
   | 'ROTATING_BAR'
@@ -80,10 +153,15 @@ export type ObstacleType =
   | 'BOUNCY_MUSHROOM'
   | 'LASER_GATE'
   | 'VORTEX_FUNNEL'
-  | 'SEESAW'
   | 'WIND_FAN'
+  | 'CLOUD_TRAMPOLINE'
   | 'ICE_PATCH'
-  | 'MUD_PATCH';
+  | 'ICE_SPIRE'
+  | 'SNOW_BLOWER'
+  | 'MUD_PATCH'
+  | 'QUICKSAND_PIT'
+  | 'SANDSTORM_VORTEX'
+  | 'PYRAMID_BUMPER';
 
 export interface Obstacle {
   id: string;
@@ -99,6 +177,7 @@ export interface Obstacle {
   power?: number;
   state?: number;
   laserActive?: boolean;
+  fireActive?: boolean;
   phase?: number;
   customData?: any;
 }
@@ -115,7 +194,11 @@ export interface TrackWall {
 export interface TrackData {
   level: number;
   name: string;
-  theme: TrackTheme;
+  theme: TrackThemeType;
+  material: TrackMaterial;
+  materialName: string;
+  texturePattern: TexturePatternType;
+  physicsConfig: TrackPhysicsConfig;
   difficulty: number;
   width: number;
   height: number;
@@ -128,6 +211,9 @@ export interface TrackData {
   backgroundGradient: [string, string, string];
   accentColor: string;
   railColor: string;
+  floorColor: string;
+  gridColor: string;
+  hurdlesDescription?: string;
 }
 
 export interface Particle {
@@ -140,7 +226,7 @@ export interface Particle {
   alpha: number;
   life: number;
   maxLife: number;
-  shape?: 'CIRCLE' | 'STAR' | 'SPARK' | 'CONFETTI';
+  shape?: 'CIRCLE' | 'STAR' | 'SPARK' | 'CONFETTI' | 'FLAME' | 'SMOKE';
 }
 
 export interface UserBoostPad {
@@ -156,15 +242,28 @@ export interface RaceWinnerInfo {
   winner: CountryballDef;
   level: number;
   trackName: string;
-  theme: TrackTheme;
+  theme: string;
+  materialName: string;
   finishTime: number;
   podium: { rank: number; ball: CountryballDef; finishTime: number }[];
+  isGrandFinale: boolean;
+  totalCompetitors: number;
+  qualifiedForNext: number;
 }
 
-export interface LeaderboardStats {
-  countryId: string;
-  wins: number;
-  podiums: number;
-  totalPoints: number;
-  racesCount: number;
+export interface CommentaryMessage {
+  id: string;
+  text: string;
+  timestamp: number;
+  type: 'LEAD_CHANGE' | 'HAZARD_HIT' | 'OVERTAKE' | 'FINISH' | 'TOURNAMENT' | 'HYPE';
+  countryCode?: string;
+  countryName?: string;
+}
+
+export interface TournamentStageInfo {
+  currentLevel: number;
+  totalLevels: number; // 50
+  startingRacersCount: number; // 100 at level 1 down to 3 at level 50
+  remainingRacersCount: number;
+  isGrandFinale: boolean;
 }
